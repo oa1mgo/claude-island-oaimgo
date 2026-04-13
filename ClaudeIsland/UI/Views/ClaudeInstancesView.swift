@@ -11,12 +11,19 @@ import SwiftUI
 struct ClaudeInstancesView: View {
     @ObservedObject var sessionMonitor: ClaudeSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
+    @ObservedObject var musicManager: MusicManager
 
     var body: some View {
-        if sessionMonitor.instances.isEmpty {
-            emptyState
-        } else {
-            instancesList
+        VStack(spacing: 8) {
+            if musicManager.isVisible {
+                MusicCardView(musicManager: musicManager)
+            }
+
+            if sessionMonitor.instances.isEmpty {
+                emptyState
+            } else {
+                instancesList
+            }
         }
     }
 
