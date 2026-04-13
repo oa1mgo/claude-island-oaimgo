@@ -145,6 +145,7 @@ private extension MusicCardView {
     func trimmedPlaybackText(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     @ViewBuilder
