@@ -7,6 +7,43 @@
 
 import Combine
 import Foundation
+
+#if LOCAL_SHARE_BUILD
+
+enum UpdateState: Equatable {
+    case idle
+    case checking
+    case upToDate
+    case found(version: String, releaseNotes: String?)
+    case downloading(progress: Double)
+    case extracting(progress: Double)
+    case readyToInstall(version: String)
+    case installing
+    case error(message: String)
+
+    var isActive: Bool { false }
+}
+
+@MainActor
+class UpdateManager: NSObject, ObservableObject {
+    static let shared = UpdateManager()
+
+    @Published var state: UpdateState = .idle
+    @Published var hasUnseenUpdate: Bool = false
+
+    func checkForUpdates() {}
+    func downloadAndInstall() {}
+    func installAndRelaunch() {}
+    func skipUpdate() {}
+    func dismissUpdate() {}
+    func cancelDownload() {}
+    func markUpdateSeen() { hasUnseenUpdate = false }
+}
+
+class NotchUserDriver: NSObject {}
+
+#else
+
 import Sparkle
 
 /// Update state published to UI
@@ -92,7 +129,6 @@ class UpdateManager: NSObject, ObservableObject {
         self.currentVersion = version
         self.installHandler = installHandler
         self.state = .found(version: version, releaseNotes: releaseNotes)
-        // Only show the dot if user hasn't seen it this session
         if !hasSeenUpdateThisSession {
             self.hasUnseenUpdate = true
         }
@@ -143,7 +179,6 @@ class UpdateManager: NSObject, ObservableObject {
 
     func noUpdateFound() {
         self.state = .upToDate
-        // Reset to idle after a few seconds
         Task {
             try? await Task.sleep(for: .seconds(5))
             if case .upToDate = self.state {
@@ -157,7 +192,6 @@ class UpdateManager: NSObject, ObservableObject {
     }
 
     func dismiss() {
-        // Don't dismiss if we're showing "up to date" - let it display
         if case .upToDate = state {
             return
         }
@@ -169,13 +203,9 @@ class UpdateManager: NSObject, ObservableObject {
 
 /// Custom Sparkle user driver that routes all UI to NotchUpdateManager
 class NotchUserDriver: NSObject, SPUUserDriver {
-
     var canCheckForUpdates: Bool { true }
 
-    // MARK: - Update Found
-
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
-        // Auto-approve update checks
         reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false))
     }
 
@@ -194,13 +224,9 @@ class NotchUserDriver: NSObject, SPUUserDriver {
         }
     }
 
-    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
-        // Release notes downloaded - we already have them from appcastItem
-    }
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
 
-    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {
-        // Ignore release notes failures
-    }
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
 
     func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
         Task { @MainActor in
@@ -215,8 +241,6 @@ class NotchUserDriver: NSObject, SPUUserDriver {
         }
         acknowledgement()
     }
-
-    // MARK: - Download Progress
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         Task { @MainActor in
@@ -273,19 +297,15 @@ class NotchUserDriver: NSObject, SPUUserDriver {
         }
     }
 
-    // MARK: - Resume/Focus
-
-    func showUpdateInFocus() {
-        // Could expand notch here if desired
-    }
+    func showUpdateInFocus() {}
 
     func showResumableUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        // Resumable update - treat same as regular update found
         showUpdateFound(with: appcastItem, state: state, reply: reply)
     }
 
     func showInformationalUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        // Informational only - dismiss for now
         reply(.dismiss)
     }
 }
+
+#endif

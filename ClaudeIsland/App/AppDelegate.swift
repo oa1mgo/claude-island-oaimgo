@@ -1,8 +1,10 @@
 import AppKit
 import IOKit
 import Mixpanel
-import Sparkle
 import SwiftUI
+#if !LOCAL_SHARE_BUILD
+import Sparkle
+#endif
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
@@ -10,14 +12,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateCheckTimer: Timer?
 
     static var shared: AppDelegate?
+#if !LOCAL_SHARE_BUILD
     let updater: SPUUpdater
     private let userDriver: NotchUserDriver
+#endif
 
     var windowController: NotchWindowController? {
         windowManager?.windowController
     }
 
     override init() {
+#if !LOCAL_SHARE_BUILD
         userDriver = NotchUserDriver()
         updater = SPUUpdater(
             hostBundle: Bundle.main,
@@ -33,6 +38,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("Failed to start Sparkle updater: \(error)")
         }
+#else
+        super.init()
+        AppDelegate.shared = self
+#endif
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -77,6 +86,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleScreenChange()
         }
 
+#if !LOCAL_SHARE_BUILD
         if updater.canCheckForUpdates {
             updater.checkForUpdates()
         }
@@ -85,6 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let updater = self?.updater, updater.canCheckForUpdates else { return }
             updater.checkForUpdates()
         }
+#endif
     }
 
     private func handleScreenChange() {
