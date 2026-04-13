@@ -19,6 +19,7 @@ struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
+    @StateObject private var musicManager = MusicManager.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
@@ -65,6 +66,10 @@ struct NotchView: View {
 
     /// Extra width for expanding activities (like Dynamic Island)
     private var expansionWidth: CGFloat {
+        if showMusicActivity {
+            return max(140, closedNotchSize.height * 4.2)
+        }
+
         // Permission indicator adds width on left side only
         let permissionIndicatorWidth: CGFloat = hasPendingPermission ? 18 : 0
 
@@ -171,6 +176,7 @@ struct NotchView: View {
                     .animation(.smooth, value: activityCoordinator.expandingActivity)
                     .animation(.smooth, value: hasPendingPermission)
                     .animation(.smooth, value: hasWaitingForInput)
+                    .animation(.smooth, value: showMusicActivity)
                     .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
                     .contentShape(Rectangle())
                     .onHover { hovering in
@@ -190,6 +196,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            handleProcessingChange()
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -205,6 +212,9 @@ struct NotchView: View {
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
+        .onChange(of: musicManager.playbackState) { _, _ in
+            handleProcessingChange()
+        }
     }
 
     // MARK: - Notch Layout
@@ -213,9 +223,17 @@ struct NotchView: View {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
     }
 
+    private var showMusicActivity: Bool {
+        musicManager.isVisible && !hasPendingPermission && !isAnyProcessing
+    }
+
+    private var showCompactMusicActivity: Bool {
+        viewModel.status != .opened && showMusicActivity
+    }
+
     /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
     private var showClosedActivity: Bool {
-        isProcessing || hasPendingPermission || hasWaitingForInput
+        showCompactMusicActivity || isProcessing || hasPendingPermission || hasWaitingForInput
     }
 
     @ViewBuilder
@@ -245,6 +263,11 @@ struct NotchView: View {
 
     @ViewBuilder
     private var headerRow: some View {
+        if showCompactMusicActivity {
+            CompactMusicActivityView(musicManager: musicManager)
+                .padding(.horizontal, 10)
+                .frame(height: closedNotchSize.height)
+        } else {
         HStack(spacing: 0) {
             // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
             if showClosedActivity {
@@ -295,6 +318,7 @@ struct NotchView: View {
             }
         }
         .frame(height: closedNotchSize.height)
+        }
     }
 
     private var sideWidth: CGFloat {
@@ -378,6 +402,9 @@ struct NotchView: View {
             // Show claude activity when processing or waiting for permission
             activityCoordinator.showActivity(type: .claude)
             isVisible = true
+        } else if showMusicActivity {
+            activityCoordinator.hideActivity()
+            isVisible = true
         } else if hasWaitingForInput {
             // Keep visible for waiting-for-input but hide the processing spinner
             activityCoordinator.hideActivity()
@@ -410,7 +437,7 @@ struct NotchView: View {
             // Don't hide on non-notched devices - users need a visible target
             guard viewModel.hasPhysicalNotch else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !activityCoordinator.expandingActivity.show {
+                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !showMusicActivity && !activityCoordinator.expandingActivity.show {
                     isVisible = false
                 }
             }
