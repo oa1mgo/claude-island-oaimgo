@@ -7,36 +7,40 @@ struct MusicCardView: View {
         HStack(spacing: 12) {
             artwork
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(primaryLineText)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(primaryLineText)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
 
-                Text(secondaryLineText)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.55))
-                    .lineLimit(1)
+                        Text(secondaryLineText)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                ProgressView(value: musicManager.progressFraction)
-                    .tint(Color.white.opacity(0.9))
-
-                HStack {
-                    Text(formatTime(musicManager.playbackState.currentTime))
-                    Spacer()
-                    Text(formatTime(musicManager.playbackState.duration))
+                    controlsRow
                 }
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.35))
-            }
 
-            VStack(spacing: 8) {
-                Button(action: musicManager.previousTrack) { Image(systemName: "backward.fill") }
-                Button(action: musicManager.togglePlayPause) { Image(systemName: musicManager.playbackState.isPlaying ? "pause.fill" : "play.fill") }
-                Button(action: musicManager.nextTrack) { Image(systemName: "forward.fill") }
+                TimelineView(.animation(minimumInterval: musicManager.playbackState.isPlaying ? 0.2 : 1.0)) { timeline in
+                    let elapsedTime = displayedElapsedTime(at: timeline.date)
+
+                    ProgressView(value: progressFraction(for: elapsedTime))
+                        .tint(Color.white.opacity(0.9))
+
+                    HStack {
+                        Text(formatTime(elapsedTime))
+                        Spacer()
+                        Text(formatTime(musicManager.playbackState.duration))
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.35))
+                }
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.white.opacity(0.9))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .background(
@@ -97,6 +101,20 @@ private extension MusicCardView {
         .buttonStyle(.plain)
     }
 
+    var controlsRow: some View {
+        HStack(spacing: 10) {
+            transportButton(systemName: "backward.fill", action: musicManager.previousTrack)
+
+            transportButton(
+                systemName: musicManager.playbackState.isPlaying ? "pause.fill" : "play.fill",
+                action: musicManager.togglePlayPause,
+                isPrimary: true
+            )
+
+            transportButton(systemName: "forward.fill", action: musicManager.nextTrack)
+        }
+    }
+
     func formatTime(_ time: TimeInterval) -> String {
         let totalSeconds = max(Int(time.rounded()), 0)
         let minutes = totalSeconds / 60
@@ -104,8 +122,43 @@ private extension MusicCardView {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
+    func displayedElapsedTime(at date: Date) -> TimeInterval {
+        let state = musicManager.playbackState
+        guard state.isPlaying else {
+            return clampedElapsedTime(state.currentTime, duration: state.duration)
+        }
+
+        let delta = max(0, date.timeIntervalSince(state.lastUpdated))
+        return clampedElapsedTime(state.currentTime + (delta * state.playbackRate), duration: state.duration)
+    }
+
+    func progressFraction(for elapsedTime: TimeInterval) -> Double {
+        guard musicManager.playbackState.duration > 0 else { return 0 }
+        return min(max(elapsedTime / musicManager.playbackState.duration, 0), 1)
+    }
+
+    func clampedElapsedTime(_ elapsedTime: TimeInterval, duration: TimeInterval) -> TimeInterval {
+        guard duration > 0 else { return max(0, elapsedTime) }
+        return min(max(0, elapsedTime), duration)
+    }
+
     func trimmedPlaybackText(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    @ViewBuilder
+    func transportButton(systemName: String, action: @escaping () -> Void, isPrimary: Bool = false) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: isPrimary ? 13 : 11, weight: .semibold))
+                .foregroundColor(.white.opacity(isPrimary ? 0.98 : 0.82))
+                .frame(width: isPrimary ? 28 : 24, height: isPrimary ? 28 : 24)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(isPrimary ? 0.12 : 0.05))
+                )
+        }
+        .buttonStyle(.plain)
     }
 }

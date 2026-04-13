@@ -8,6 +8,8 @@ struct PlaybackState: Equatable, Sendable {
     var album: String
     var currentTime: TimeInterval
     var duration: TimeInterval
+    var playbackRate: Double
+    var lastUpdated: Date
     var artworkData: Data?
 
     init(
@@ -18,6 +20,8 @@ struct PlaybackState: Equatable, Sendable {
         album: String = "",
         currentTime: TimeInterval = 0,
         duration: TimeInterval = 0,
+        playbackRate: Double = 1,
+        lastUpdated: Date = .distantPast,
         artworkData: Data? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
@@ -27,6 +31,8 @@ struct PlaybackState: Equatable, Sendable {
         self.album = album
         self.currentTime = currentTime
         self.duration = duration
+        self.playbackRate = playbackRate
+        self.lastUpdated = lastUpdated
         self.artworkData = artworkData
     }
 

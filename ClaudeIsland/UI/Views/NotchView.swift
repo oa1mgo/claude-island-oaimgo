@@ -67,7 +67,7 @@ struct NotchView: View {
     /// Extra width for expanding activities (like Dynamic Island)
     private var expansionWidth: CGFloat {
         if showMusicActivity {
-            return max(140, closedNotchSize.height * 4.2)
+            return max(56, closedNotchSize.height * 1.8)
         }
 
         // Permission indicator adds width on left side only
@@ -265,7 +265,7 @@ struct NotchView: View {
     private var headerRow: some View {
         if showCompactMusicActivity {
             CompactMusicActivityView(musicManager: musicManager)
-                .padding(.horizontal, 10)
+                .frame(width: closedContentWidth, height: closedNotchSize.height, alignment: .leading)
                 .frame(height: closedNotchSize.height)
         } else {
         HStack(spacing: 0) {

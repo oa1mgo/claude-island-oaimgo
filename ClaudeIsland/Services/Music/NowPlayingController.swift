@@ -275,6 +275,8 @@ private extension NowPlayingController {
             album: resolvedString(payload.album, previous: previous.album, diff: diff),
             currentTime: resolvedDouble(payload.elapsedTime, previous: previous.currentTime, diff: diff),
             duration: resolvedDouble(payload.duration, previous: previous.duration, diff: diff),
+            playbackRate: resolvedDouble(payload.playbackRate, previous: previous.playbackRate, diff: diff),
+            lastUpdated: resolvedDate(payload.timestamp, previous: previous.lastUpdated, diff: diff),
             artworkData: resolvedArtworkData(payload.artworkData, previous: previous.artworkData, diff: diff)
         )
     }
@@ -298,6 +300,13 @@ private extension NowPlayingController {
             return Data(base64Encoded: value)
         }
         return diff ? previous : nil
+    }
+
+    func resolvedDate(_ value: String?, previous: Date, diff: Bool) -> Date {
+        if let value, let date = ISO8601DateFormatter().date(from: value) {
+            return date
+        }
+        return diff ? previous : Date()
     }
 
     func logDecodeFailure(for data: Data, context: String) {
@@ -383,6 +392,8 @@ private struct AdapterSnapshot: Decodable {
     let album: String?
     let duration: Double?
     let elapsedTime: Double?
+    let timestamp: String?
+    let playbackRate: Double?
     let artworkData: String?
     let playing: Bool?
     let parentApplicationBundleIdentifier: String?
