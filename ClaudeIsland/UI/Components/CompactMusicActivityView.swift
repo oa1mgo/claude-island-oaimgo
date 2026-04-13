@@ -26,7 +26,10 @@ struct CompactMusicActivityView: View {
 
             Spacer(minLength: 0)
 
-            CompactPlaybackIndicatorView(isPlaying: musicManager.playbackState.isPlaying)
+            CompactPlaybackIndicatorView(
+                isPlaying: musicManager.playbackState.isPlaying,
+                gradientColors: musicManager.artworkGradient
+            )
                 .frame(width: 14, height: 14)
         }
         .padding(.horizontal, 10)
@@ -77,9 +80,10 @@ private extension CompactMusicActivityView {
 
 private struct CompactPlaybackIndicatorView: View {
     let isPlaying: Bool
+    let gradientColors: [NSColor]
 
     var body: some View {
-        CompactAudioSpectrumView(isPlaying: isPlaying)
+        CompactAudioSpectrumView(isPlaying: isPlaying, gradientColors: gradientColors)
             .frame(width: 16, height: 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
@@ -87,14 +91,17 @@ private struct CompactPlaybackIndicatorView: View {
 
 private struct CompactAudioSpectrumView: NSViewRepresentable {
     let isPlaying: Bool
+    let gradientColors: [NSColor]
 
     func makeNSView(context: Context) -> CompactAudioSpectrum {
         let spectrum = CompactAudioSpectrum()
+        spectrum.setGradientColors(gradientColors)
         spectrum.setPlaying(isPlaying)
         return spectrum
     }
 
     func updateNSView(_ nsView: CompactAudioSpectrum, context: Context) {
+        nsView.setGradientColors(gradientColors)
         nsView.setPlaying(isPlaying)
     }
 }
@@ -104,10 +111,12 @@ private final class CompactAudioSpectrum: NSView {
     private let barCount = 4
     private let totalHeight: CGFloat = 14
 
+    private let gradientLayer = CAGradientLayer()
     private var barLayers: [CAShapeLayer] = []
     private var barScales: [CGFloat] = []
     private var isPlaying = true
     private var animationTimer: Timer?
+    private var gradientPhase: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -136,10 +145,31 @@ private final class CompactAudioSpectrum: NSView {
         }
     }
 
+    func setGradientColors(_ colors: [NSColor]) {
+        let resolved = colors.isEmpty
+            ? [NSColor.white.withAlphaComponent(0.95), NSColor.white.withAlphaComponent(0.7)]
+            : colors
+        gradientLayer.colors = resolved.map(\.cgColor)
+    }
+
     private func setupBars() {
         let spacing = barWidth
         let totalWidth = CGFloat(barCount) * (barWidth + spacing)
         frame.size = CGSize(width: totalWidth, height: totalHeight)
+
+        gradientLayer.frame = CGRect(origin: .zero, size: CGSize(width: totalWidth, height: totalHeight))
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.15)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.85)
+        gradientLayer.locations = [0, 0.55, 1]
+        gradientLayer.colors = [
+            NSColor.white.withAlphaComponent(0.95).cgColor,
+            NSColor.white.withAlphaComponent(0.75).cgColor,
+            NSColor.white.withAlphaComponent(0.55).cgColor
+        ]
+        layer?.addSublayer(gradientLayer)
+
+        let maskLayer = CALayer()
+        maskLayer.frame = gradientLayer.bounds
 
         for index in 0..<barCount {
             let xPosition = CGFloat(index) * (barWidth + spacing)
@@ -147,16 +177,18 @@ private final class CompactAudioSpectrum: NSView {
             barLayer.frame = CGRect(x: xPosition, y: 0, width: barWidth, height: totalHeight)
             barLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             barLayer.position = CGPoint(x: xPosition + barWidth / 2, y: totalHeight / 2)
-            barLayer.fillColor = NSColor.white.cgColor
-            barLayer.backgroundColor = NSColor.white.cgColor
+            barLayer.fillColor = NSColor.black.cgColor
+            barLayer.backgroundColor = NSColor.black.cgColor
             barLayer.allowsGroupOpacity = false
             barLayer.masksToBounds = true
             barLayer.path = roundedBarPath()
             barLayer.transform = CATransform3DMakeScale(1, 0.35, 1)
             barLayers.append(barLayer)
             barScales.append(0.35)
-            layer?.addSublayer(barLayer)
+            maskLayer.addSublayer(barLayer)
         }
+
+        gradientLayer.mask = maskLayer
     }
 
     private func roundedBarPath() -> CGPath {
@@ -186,6 +218,28 @@ private final class CompactAudioSpectrum: NSView {
     }
 
     private func updateBars() {
+        gradientPhase = gradientPhase >= 1 ? 0 : gradientPhase + 0.17
+        let startX = min(max(gradientPhase * 0.32, 0), 0.32)
+        let endX = min(max(0.68 + gradientPhase * 0.24, 0.68), 1)
+
+        let startAnimation = CABasicAnimation(keyPath: "startPoint")
+        startAnimation.fromValue = gradientLayer.presentation()?.startPoint ?? gradientLayer.startPoint
+        startAnimation.toValue = CGPoint(x: startX, y: 0.15)
+        startAnimation.duration = 0.3
+        startAnimation.fillMode = .forwards
+        startAnimation.isRemovedOnCompletion = false
+        gradientLayer.add(startAnimation, forKey: "startPoint")
+        gradientLayer.startPoint = CGPoint(x: startX, y: 0.15)
+
+        let endAnimation = CABasicAnimation(keyPath: "endPoint")
+        endAnimation.fromValue = gradientLayer.presentation()?.endPoint ?? gradientLayer.endPoint
+        endAnimation.toValue = CGPoint(x: endX, y: 0.85)
+        endAnimation.duration = 0.3
+        endAnimation.fillMode = .forwards
+        endAnimation.isRemovedOnCompletion = false
+        gradientLayer.add(endAnimation, forKey: "endPoint")
+        gradientLayer.endPoint = CGPoint(x: endX, y: 0.85)
+
         for (index, barLayer) in barLayers.enumerated() {
             let currentScale = barScales[index]
             let targetScale = CGFloat.random(in: 0.35...1.0)
@@ -208,6 +262,10 @@ private final class CompactAudioSpectrum: NSView {
     }
 
     private func resetBars() {
+        gradientLayer.removeAllAnimations()
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.15)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.85)
+
         for (index, barLayer) in barLayers.enumerated() {
             barLayer.removeAllAnimations()
             barLayer.transform = CATransform3DMakeScale(1, 0.35, 1)
