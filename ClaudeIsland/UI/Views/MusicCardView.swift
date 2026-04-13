@@ -13,7 +13,7 @@ struct MusicCardView: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
 
-                Text(musicManager.playbackState.artist.isEmpty ? musicManager.playbackState.album : musicManager.playbackState.artist)
+                Text(secondaryLineText)
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
@@ -47,6 +47,18 @@ struct MusicCardView: View {
 }
 
 private extension MusicCardView {
+    var secondaryLineText: String {
+        if !musicManager.playbackState.artist.isEmpty {
+            return musicManager.playbackState.artist
+        }
+
+        if !musicManager.playbackState.album.isEmpty {
+            return musicManager.playbackState.album
+        }
+
+        return "Unknown Artist"
+    }
+
     var artwork: some View {
         Button(action: musicManager.openSourceApp) {
             Group {
