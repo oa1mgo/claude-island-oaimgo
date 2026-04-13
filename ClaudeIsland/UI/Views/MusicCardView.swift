@@ -66,11 +66,15 @@ private extension MusicCardView {
     }
 
     var secondaryLineText: String {
-        if trimmedTitle != nil {
-            return trimmedArtist ?? trimmedAlbum ?? "Unknown Artist"
+        let secondaryCandidates = [trimmedArtist, trimmedAlbum]
+            .compactMap { $0 }
+            .filter { $0 != primaryLineText }
+
+        if let secondaryText = secondaryCandidates.first {
+            return secondaryText
         }
 
-        return trimmedAlbum ?? "Unknown Artist"
+        return "Unknown Artist"
     }
 
     var artwork: some View {
