@@ -1,7 +1,10 @@
 import AppKit
 import Combine
+import CryptoKit
 import Foundation
+import OSLog
 
+@MainActor
 final class NowPlayingController: MediaControllerProtocol {
     private enum AdapterCommand: Int {
         case togglePlayPause = 2
@@ -9,9 +12,17 @@ final class NowPlayingController: MediaControllerProtocol {
         case previousTrack = 5
     }
 
+    private struct AdapterExecutionResult {
+        let data: Data
+        let standardError: String
+        let terminationStatus: Int32
+    }
+
     private let subject = CurrentValueSubject<PlaybackState, Never>(PlaybackState())
     private let decoder = JSONDecoder()
+    private let logger = Logger(subsystem: "com.celestial.ClaudeIsland", category: "NowPlaying")
 
+    private var cachedFrameworkURL: URL?
     private var streamProcess: Process?
     private var streamPipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
@@ -22,12 +33,14 @@ final class NowPlayingController: MediaControllerProtocol {
 
     init() {
         startStreamingUpdates()
-        refresh()
     }
 
     deinit {
         streamTask?.cancel()
-        streamProcess?.terminate()
+
+        if let streamProcess, streamProcess.isRunning {
+            streamProcess.terminate()
+        }
 
         if let streamPipeHandler {
             Task {
@@ -39,9 +52,16 @@ final class NowPlayingController: MediaControllerProtocol {
 
 extension NowPlayingController {
     func refresh() {
-        Task { [weak self] in
-            guard let self, let data = await self.runAdapter(arguments: ["get"]) else { return }
-            self.applySnapshot(from: data)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let result = await self.runAdapter(arguments: ["get"], context: "refresh") else { return }
+
+            guard result.terminationStatus == 0 else {
+                self.logger.error("Adapter refresh failed with status \(result.terminationStatus)")
+                return
+            }
+
+            self.applySnapshot(from: result.data)
         }
     }
 
@@ -76,109 +96,150 @@ extension NowPlayingController {
 
 private extension NowPlayingController {
     func startStreamingUpdates() {
-        guard let scriptURL = adapterScriptURL, let frameworkURL = adapterFrameworkURL else {
+        guard let scriptURL = adapterScriptURL(), let frameworkURL = adapterFrameworkURL() else {
             return
         }
 
         let process = Process()
         let pipeHandler = JSONLinesPipeHandler()
+        let errorPipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         process.arguments = [scriptURL.path, frameworkURL.path, "stream", "--debounce=50"]
         process.standardOutput = pipeHandler.pipe
-        process.standardError = Pipe()
+        process.standardError = errorPipe
+        process.terminationHandler = { [logger] process in
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if process.terminationStatus != 0 {
+                logger.error("Adapter stream exited with status \(process.terminationStatus): \(errorOutput, privacy: .public)")
+            }
+        }
 
         do {
             try process.run()
             streamProcess = process
             streamPipeHandler = pipeHandler
-            streamTask = Task { [weak self] in
+            streamTask = Task { @MainActor [weak self] in
                 guard let self else { return }
-                await pipeHandler.readJSONLines(as: AdapterStreamEvent.self) { [weak self] event in
-                    await MainActor.run {
-                        self?.apply(event: event)
-                    }
+
+                await pipeHandler.readJSONLines(as: AdapterStreamEvent.self, logger: self.logger) { [weak self] event in
+                    guard let self else { return }
+                    self.apply(event: event)
                 }
             }
         } catch {
+            logger.error("Failed to launch adapter stream: \(String(describing: error), privacy: .public)")
             streamProcess = nil
             streamPipeHandler = nil
         }
     }
 
     private func sendCommand(_ command: AdapterCommand) {
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = await self.runAdapter(arguments: ["send", String(command.rawValue)])
+            guard let result = await self.runAdapter(
+                arguments: ["send", String(command.rawValue)],
+                context: "send-\(command.rawValue)"
+            ) else {
+                return
+            }
+
+            guard result.terminationStatus == 0 else {
+                self.logger.error("Adapter command \(command.rawValue) failed with status \(result.terminationStatus)")
+                return
+            }
 
             try? await Task.sleep(for: .milliseconds(200))
             self.refresh()
         }
     }
 
-    func runAdapter(arguments: [String]) async -> Data? {
-        guard let scriptURL = adapterScriptURL, let frameworkURL = adapterFrameworkURL else {
+    private func runAdapter(arguments: [String], context: String) async -> AdapterExecutionResult? {
+        guard let scriptURL = adapterScriptURL(), let frameworkURL = adapterFrameworkURL() else {
             return nil
         }
 
         return await withCheckedContinuation { continuation in
             let process = Process()
             let outputPipe = Pipe()
+            let errorPipe = Pipe()
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
             process.arguments = [scriptURL.path, frameworkURL.path] + arguments
             process.standardOutput = outputPipe
-            process.standardError = Pipe()
-            process.terminationHandler = { _ in
-                let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: data.isEmpty ? nil : data)
+            process.standardError = errorPipe
+            process.terminationHandler = { [logger] process in
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                if process.terminationStatus != 0 {
+                    logger.error("Adapter \(context, privacy: .public) failed with status \(process.terminationStatus): \(errorOutput, privacy: .public)")
+                }
+
+                continuation.resume(
+                    returning: AdapterExecutionResult(
+                        data: outputData,
+                        standardError: errorOutput,
+                        terminationStatus: process.terminationStatus
+                    )
+                )
             }
 
             do {
                 try process.run()
             } catch {
+                logger.error("Failed to launch adapter \(context, privacy: .public): \(String(describing: error), privacy: .public)")
                 continuation.resume(returning: nil)
             }
         }
     }
 
-    var adapterScriptURL: URL? {
-        Bundle.main.url(forResource: "mediaremote-adapter", withExtension: "pl")
+    func adapterScriptURL() -> URL? {
+        if let url = Bundle.main.url(forResource: "mediaremote-adapter", withExtension: "pl") {
+            return url
+        }
+
+        logger.error("Missing bundled resource: mediaremote-adapter.pl")
+        return nil
     }
 
-    var adapterFrameworkURL: URL? {
+    func adapterFrameworkURL() -> URL? {
+        if let cachedFrameworkURL, FileManager.default.fileExists(atPath: cachedFrameworkURL.path) {
+            return cachedFrameworkURL
+        }
+
         guard let archiveURL = Bundle.main.url(forResource: "MediaRemoteAdapter.framework", withExtension: "zip") else {
+            logger.error("Missing bundled resource: MediaRemoteAdapter.framework.zip")
             return nil
         }
 
-        let extractionRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "ClaudeIslandMediaRemoteAdapter",
-            isDirectory: true
-        )
-        let frameworkURL = extractionRoot.appendingPathComponent("MediaRemoteAdapter.framework", isDirectory: true)
+        guard
+            let archiveData = try? Data(contentsOf: archiveURL),
+            let extractionRoot = adapterExtractionRoot(for: archiveData)
+        else {
+            logger.error("Failed to prepare adapter extraction root")
+            return nil
+        }
 
+        let frameworkURL = extractionRoot.appendingPathComponent("MediaRemoteAdapter.framework", isDirectory: true)
         if FileManager.default.fileExists(atPath: frameworkURL.path) {
+            cachedFrameworkURL = frameworkURL
             return frameworkURL
         }
 
-        try? FileManager.default.removeItem(at: extractionRoot)
-        try? FileManager.default.createDirectory(at: extractionRoot, withIntermediateDirectories: true)
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", archiveURL.path, extractionRoot.path]
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0 ? frameworkURL : nil
-        } catch {
-            return nil
-        }
+        let extractedFrameworkURL = extractFrameworkArchive(at: archiveURL, to: extractionRoot)
+        cachedFrameworkURL = extractedFrameworkURL
+        return extractedFrameworkURL
     }
 
     func applySnapshot(from data: Data) {
-        guard let snapshot = try? decoder.decode(AdapterSnapshot.self, from: data) else { return }
+        guard let snapshot = try? decoder.decode(AdapterSnapshot.self, from: data) else {
+            logDecodeFailure(for: data, context: "snapshot")
+            return
+        }
 
         let state = makePlaybackState(
             payload: snapshot,
@@ -204,24 +265,17 @@ private extension NowPlayingController {
         diff: Bool,
         previous: PlaybackState
     ) -> PlaybackState {
-        let title = resolvedString(payload.title, previous: previous.title, diff: diff)
-        let artist = resolvedString(payload.artist, previous: previous.artist, diff: diff)
-        let album = resolvedString(payload.album, previous: previous.album, diff: diff)
-        let currentTime = resolvedDouble(payload.elapsedTime, previous: previous.currentTime, diff: diff)
-        let duration = resolvedDouble(payload.duration, previous: previous.duration, diff: diff)
-        let artworkData = resolvedArtworkData(payload.artworkData, previous: previous.artworkData, diff: diff)
-
-        return PlaybackState(
+        PlaybackState(
             bundleIdentifier: payload.bundleIdentifier
                 ?? payload.parentApplicationBundleIdentifier
                 ?? (diff ? previous.bundleIdentifier : NSWorkspace.shared.frontmostApplication?.bundleIdentifier),
             isPlaying: payload.playing ?? (diff ? previous.isPlaying : false),
-            title: title,
-            artist: artist,
-            album: album,
-            currentTime: currentTime,
-            duration: duration,
-            artworkData: artworkData
+            title: resolvedString(payload.title, previous: previous.title, diff: diff),
+            artist: resolvedString(payload.artist, previous: previous.artist, diff: diff),
+            album: resolvedString(payload.album, previous: previous.album, diff: diff),
+            currentTime: resolvedDouble(payload.elapsedTime, previous: previous.currentTime, diff: diff),
+            duration: resolvedDouble(payload.duration, previous: previous.duration, diff: diff),
+            artworkData: resolvedArtworkData(payload.artworkData, previous: previous.artworkData, diff: diff)
         )
     }
 
@@ -244,6 +298,76 @@ private extension NowPlayingController {
             return Data(base64Encoded: value)
         }
         return diff ? previous : nil
+    }
+
+    func logDecodeFailure(for data: Data, context: String) {
+        let sample = String(data: data.prefix(256), encoding: .utf8) ?? "<non-utf8>"
+        logger.error("Failed to decode adapter \(context, privacy: .public): \(sample, privacy: .public)")
+    }
+
+    func adapterExtractionRoot(for archiveData: Data) -> URL? {
+        let digest = SHA256.hash(data: archiveData).map { String(format: "%02x", $0) }.joined()
+        let baseDirectoryName = Bundle.main.bundleIdentifier ?? "ClaudeIsland"
+
+        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            logger.error("Unable to resolve caches directory for adapter extraction")
+            return nil
+        }
+
+        let baseURL = cachesURL
+            .appendingPathComponent(baseDirectoryName, isDirectory: true)
+            .appendingPathComponent("MusicAdapter", isDirectory: true)
+
+        try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        return baseURL.appendingPathComponent(digest, isDirectory: true)
+    }
+
+    func extractFrameworkArchive(at archiveURL: URL, to extractionRoot: URL) -> URL? {
+        let finalFrameworkURL = extractionRoot.appendingPathComponent("MediaRemoteAdapter.framework", isDirectory: true)
+        let tempRootURL = extractionRoot.deletingLastPathComponent()
+            .appendingPathComponent("\(extractionRoot.lastPathComponent)-\(UUID().uuidString)", isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(at: tempRootURL, withIntermediateDirectories: true)
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-x", "-k", archiveURL.path, tempRootURL.path]
+            try process.run()
+            process.waitUntilExit()
+
+            guard process.terminationStatus == 0 else {
+                logger.error("Framework archive extraction failed with status \(process.terminationStatus)")
+                try? FileManager.default.removeItem(at: tempRootURL)
+                return nil
+            }
+
+            let extractedFrameworkURL = tempRootURL.appendingPathComponent("MediaRemoteAdapter.framework", isDirectory: true)
+            guard FileManager.default.fileExists(atPath: extractedFrameworkURL.path) else {
+                logger.error("Extracted framework missing after archive expansion")
+                try? FileManager.default.removeItem(at: tempRootURL)
+                return nil
+            }
+
+            do {
+                try FileManager.default.moveItem(at: tempRootURL, to: extractionRoot)
+            } catch {
+                if FileManager.default.fileExists(atPath: finalFrameworkURL.path) {
+                    try? FileManager.default.removeItem(at: tempRootURL)
+                    return finalFrameworkURL
+                }
+
+                logger.error("Failed to finalize framework extraction: \(String(describing: error), privacy: .public)")
+                try? FileManager.default.removeItem(at: tempRootURL)
+                return nil
+            }
+
+            return finalFrameworkURL
+        } catch {
+            logger.error("Failed to extract framework archive: \(String(describing: error), privacy: .public)")
+            try? FileManager.default.removeItem(at: tempRootURL)
+            return nil
+        }
     }
 }
 
@@ -276,7 +400,11 @@ private actor JSONLinesPipeHandler {
         fileHandle = pipe.fileHandleForReading
     }
 
-    func readJSONLines<T: Decodable>(as type: T.Type, onLine: @escaping (T) async -> Void) async {
+    func readJSONLines<T: Decodable>(
+        as type: T.Type,
+        logger: Logger,
+        onLine: @escaping (T) async -> Void
+    ) async {
         do {
             while true {
                 let data = try await readData()
@@ -289,20 +417,21 @@ private actor JSONLinesPipeHandler {
                         let line = String(buffer[..<range.lowerBound])
                         buffer = String(buffer[range.upperBound...])
 
-                        guard
-                            !line.isEmpty,
-                            let data = line.data(using: .utf8),
-                            let value = try? JSONDecoder().decode(T.self, from: data)
-                        else {
-                            continue
-                        }
+                        guard !line.isEmpty else { continue }
+                        guard let data = line.data(using: .utf8) else { continue }
 
-                        await onLine(value)
+                        do {
+                            let value = try JSONDecoder().decode(T.self, from: data)
+                            await onLine(value)
+                        } catch {
+                            let sample = String(line.prefix(256))
+                            logger.error("Failed to decode adapter stream line: \(sample, privacy: .public)")
+                        }
                     }
                 }
             }
         } catch {
-            return
+            logger.error("Failed while reading adapter stream: \(String(describing: error), privacy: .public)")
         }
     }
 
