@@ -8,7 +8,7 @@ struct MusicCardView: View {
             artwork
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(musicManager.playbackState.title.isEmpty ? "Nothing Playing" : musicManager.playbackState.title)
+                Text(primaryLineText)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -47,16 +47,16 @@ struct MusicCardView: View {
 }
 
 private extension MusicCardView {
+    var primaryLineText: String {
+        trimmedPlaybackText(musicManager.playbackState.title)
+            ?? trimmedPlaybackText(musicManager.playbackState.artist)
+            ?? "Nothing Playing"
+    }
+
     var secondaryLineText: String {
-        if !musicManager.playbackState.artist.isEmpty {
-            return musicManager.playbackState.artist
-        }
-
-        if !musicManager.playbackState.album.isEmpty {
-            return musicManager.playbackState.album
-        }
-
-        return "Unknown Artist"
+        trimmedPlaybackText(musicManager.playbackState.artist)
+            ?? trimmedPlaybackText(musicManager.playbackState.album)
+            ?? "Unknown Artist"
     }
 
     var artwork: some View {
@@ -84,5 +84,10 @@ private extension MusicCardView {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    func trimmedPlaybackText(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
