@@ -4,8 +4,6 @@ import Foundation
 
 @MainActor
 final class MusicManager: ObservableObject {
-    static let shared = MusicManager()
-
     @Published private(set) var playbackState = PlaybackState()
     @Published private(set) var albumArt: NSImage?
 

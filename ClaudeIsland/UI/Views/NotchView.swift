@@ -19,7 +19,7 @@ struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
-    @StateObject private var musicManager = MusicManager.shared
+    @StateObject private var musicManager = MusicManager()
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
@@ -378,7 +378,8 @@ struct NotchView: View {
             case .instances:
                 ClaudeInstancesView(
                     sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
+                    viewModel: viewModel,
+                    musicManager: musicManager
                 )
             case .menu:
                 NotchMenuView(viewModel: viewModel)

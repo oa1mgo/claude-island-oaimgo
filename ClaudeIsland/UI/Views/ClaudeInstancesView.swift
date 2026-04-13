@@ -11,7 +11,7 @@ import SwiftUI
 struct ClaudeInstancesView: View {
     @ObservedObject var sessionMonitor: ClaudeSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
-    @StateObject private var musicManager = MusicManager.shared
+    @ObservedObject var musicManager: MusicManager
 
     var body: some View {
         VStack(spacing: 8) {
