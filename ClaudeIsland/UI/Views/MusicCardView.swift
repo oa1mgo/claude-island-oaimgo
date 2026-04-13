@@ -47,16 +47,30 @@ struct MusicCardView: View {
 }
 
 private extension MusicCardView {
-    var primaryLineText: String {
+    var trimmedTitle: String? {
         trimmedPlaybackText(musicManager.playbackState.title)
-            ?? trimmedPlaybackText(musicManager.playbackState.artist)
+    }
+
+    var trimmedArtist: String? {
+        trimmedPlaybackText(musicManager.playbackState.artist)
+    }
+
+    var trimmedAlbum: String? {
+        trimmedPlaybackText(musicManager.playbackState.album)
+    }
+
+    var primaryLineText: String {
+        trimmedTitle
+            ?? trimmedArtist
             ?? "Nothing Playing"
     }
 
     var secondaryLineText: String {
-        trimmedPlaybackText(musicManager.playbackState.artist)
-            ?? trimmedPlaybackText(musicManager.playbackState.album)
-            ?? "Unknown Artist"
+        if trimmedTitle != nil {
+            return trimmedArtist ?? trimmedAlbum ?? "Unknown Artist"
+        }
+
+        return trimmedAlbum ?? "Unknown Artist"
     }
 
     var artwork: some View {
