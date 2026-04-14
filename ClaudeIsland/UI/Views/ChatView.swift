@@ -401,7 +401,7 @@ struct ChatView: View {
 
                     // Processing indicator at bottom (first due to flip)
                     if isProcessing {
-                        ProcessingIndicatorView(provider: session.provider, turnId: lastUserMessageId)
+                        SessionLoadingRow(provider: session.provider, turnId: lastUserMessageId)
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -761,54 +761,6 @@ struct AssistantMessageView: View {
 
                 Spacer(minLength: 60)
             }
-        }
-    }
-}
-
-// MARK: - Processing Indicator
-
-struct ProcessingIndicatorView: View {
-    let provider: SessionProvider
-    private let baseTexts = ["Processing", "Working"]
-    private let baseText: String
-
-    @State private var dotCount: Int = 1
-    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
-
-    private var color: Color {
-        switch provider {
-        case .claude:
-            return Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .codex:
-            return Color(red: 0.35, green: 0.62, blue: 0.96)
-        }
-    }
-
-    /// Use a turnId to select text consistently per user turn
-    init(provider: SessionProvider, turnId: String = "") {
-        self.provider = provider
-        // Use hash of turnId to pick base text consistently for this turn
-        let index = abs(turnId.hashValue) % baseTexts.count
-        baseText = baseTexts[index]
-    }
-
-    private var dots: String {
-        String(repeating: ".", count: dotCount)
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 6) {
-            ProcessingSpinner(color: color)
-                .frame(width: 6)
-
-            Text(baseText + dots)
-                .font(.system(size: 13))
-                .foregroundColor(color)
-
-            Spacer()
-        }
-        .onReceive(timer) { _ in
-            dotCount = (dotCount % 3) + 1
         }
     }
 }

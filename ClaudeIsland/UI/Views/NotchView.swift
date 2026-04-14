@@ -278,13 +278,17 @@ struct NotchView: View {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .codex
     }
 
-    private var activityTint: Color {
+    private var activeLoadingProvider: SessionProvider {
         switch activityCoordinator.expandingActivity.type {
         case .codex:
-            return Color(red: 0.34, green: 0.64, blue: 0.98)
+            return .codex
         case .claude, .none:
-            return Color(red: 0.85, green: 0.47, blue: 0.34)
+            return .claude
         }
+    }
+
+    private var activityTint: Color {
+        SessionLoadingStyle.tint(for: activeLoadingProvider)
     }
 
     private var showMusicActivity: Bool {
@@ -415,7 +419,7 @@ struct NotchView: View {
             // Right side - spinner when processing/pending, checkmark when waiting for input
             if showClosedActivity {
                 if isProcessing || hasPendingPermission {
-                    ProcessingSpinner(color: activityTint)
+                    ProcessingSpinner(provider: activeLoadingProvider)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
                         .padding(.trailing, viewModel.status == .opened ? 0 : 4)

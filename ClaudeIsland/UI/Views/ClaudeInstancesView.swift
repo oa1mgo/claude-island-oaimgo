@@ -286,15 +286,8 @@ struct InstanceRow: View {
     @State private var isHovered = false
     @State private var isYabaiAvailable = false
 
-    private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
-
     private var providerTint: Color {
-        switch session.provider {
-        case .claude:
-            return claudeOrange
-        case .codex:
-            return Color(red: 0.39, green: 0.66, blue: 0.85)
-        }
+        SessionLoadingStyle.tint(for: session.provider)
     }
 
     private var providerLabelForeground: Color {
@@ -518,7 +511,7 @@ struct InstanceRow: View {
     private var stateIndicator: some View {
         switch session.phase {
         case .processing, .compacting:
-            ProcessingSpinner(color: providerTint)
+            ProcessingSpinner(provider: session.provider)
         case .waitingForApproval:
             ProcessingSpinner(color: TerminalColors.amber)
         case .waitingForInput:
