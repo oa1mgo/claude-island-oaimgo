@@ -56,6 +56,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     // MARK: - Timestamps
 
+    var completionNotificationAt: Date?
     var lastActivity: Date
     var createdAt: Date
 
@@ -82,6 +83,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
             lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
         ),
         needsClearReconciliation: Bool = false,
+        completionNotificationAt: Date? = nil,
         lastActivity: Date = Date(),
         createdAt: Date = Date()
     ) {
@@ -98,6 +100,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.subagentState = subagentState
         self.conversationInfo = conversationInfo
         self.needsClearReconciliation = needsClearReconciliation
+        self.completionNotificationAt = completionNotificationAt
         self.lastActivity = lastActivity
         self.createdAt = createdAt
     }

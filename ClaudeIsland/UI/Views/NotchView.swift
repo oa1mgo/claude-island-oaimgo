@@ -32,6 +32,7 @@ struct NotchView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
+    @State private var previousCompletionNotificationMarkers: [String: Date] = [:]
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
@@ -65,13 +66,8 @@ struct NotchView: View {
         let now = Date()
         let displayDuration: TimeInterval = 30  // Show checkmark for 30 seconds
 
-        return sessionMonitor.instances.contains { session in
-            guard session.phase == .waitingForInput else { return false }
-            // Only show if within the 30-second display window
-            if let enteredAt = waitingForInputTimestamps[session.stableId] {
-                return now.timeIntervalSince(enteredAt) < displayDuration
-            }
-            return false
+        return waitingForInputTimestamps.values.contains { enteredAt in
+            now.timeIntervalSince(enteredAt) < displayDuration
         }
     }
 
@@ -609,33 +605,58 @@ struct NotchView: View {
     }
 
     private func handleWaitingForInputChange(_ instances: [SessionState]) {
-        // Get sessions that are now waiting for input
+        let displayDuration: TimeInterval = 30
+        let now = Date()
+
+        // Get Claude sessions that are now waiting for input
         let waitingForInputSessions = instances.filter { $0.phase == .waitingForInput }
         let currentIds = Set(waitingForInputSessions.map { $0.stableId })
         let newWaitingIds = currentIds.subtracting(previousWaitingForInputIds)
 
         // Track timestamps for newly waiting sessions
-        let now = Date()
         for session in waitingForInputSessions where newWaitingIds.contains(session.stableId) {
             waitingForInputTimestamps[session.stableId] = now
         }
 
-        // Clean up timestamps for sessions no longer waiting
-        let staleIds = Set(waitingForInputTimestamps.keys).subtracting(currentIds)
-        for staleId in staleIds {
-            waitingForInputTimestamps.removeValue(forKey: staleId)
+        // Track synthetic Codex completion notifications emitted on Stop.
+        let codexCompletionSessions = instances.filter {
+            $0.provider == .codex && $0.completionNotificationAt != nil
+        }
+        var currentCompletionMarkers: [String: Date] = [:]
+        var newCompletionSessions: [SessionState] = []
+
+        for session in codexCompletionSessions {
+            guard let completionAt = session.completionNotificationAt else { continue }
+            currentCompletionMarkers[session.stableId] = completionAt
+
+            if previousCompletionNotificationMarkers[session.stableId] != completionAt {
+                waitingForInputTimestamps[session.stableId] = completionAt
+                newCompletionSessions.append(session)
+            }
         }
 
-        // Bounce the notch when a session newly enters waitingForInput state
-        if !newWaitingIds.isEmpty {
-            // Get the sessions that just entered waitingForInput
-            let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
+        let activeTimestampIds = currentIds.union(currentCompletionMarkers.keys)
+
+        // Clean up timestamps for sessions that no longer qualify or have expired.
+        for (stableId, enteredAt) in waitingForInputTimestamps {
+            let isStillActive = activeTimestampIds.contains(stableId)
+            let isStillVisible = now.timeIntervalSince(enteredAt) < displayDuration
+            if !isStillActive || !isStillVisible {
+                waitingForInputTimestamps.removeValue(forKey: stableId)
+            }
+        }
+
+        let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
+        let newlyCompletedSessions = newlyWaitingSessions + newCompletionSessions
+
+        // Bounce the notch when a session newly enters waiting-for-input or Codex emits a stop completion.
+        if !newlyCompletedSessions.isEmpty {
 
             // Play notification sound if the session is not actively focused
             if let soundName = AppSettings.notificationSound.soundName {
                 // Check if we should play sound (async check for tmux pane focus)
                 Task {
-                    let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
+                    let shouldPlaySound = await shouldPlayNotificationSound(for: newlyCompletedSessions)
                     if shouldPlaySound {
                         await MainActor.run {
                             NSSound(named: soundName)?.play()
@@ -654,13 +675,14 @@ struct NotchView: View {
             }
 
             // Schedule hiding the checkmark after 30 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + displayDuration) { [self] in
                 // Trigger a UI update to re-evaluate hasWaitingForInput
                 handleProcessingChange()
             }
         }
 
         previousWaitingForInputIds = currentIds
+        previousCompletionNotificationMarkers = currentCompletionMarkers
     }
 
     /// Determine if notification sound should play for the given sessions

@@ -15,6 +15,41 @@ enum CodexTranscriptParser {
         }.value
     }
 
+    static func isSubagentSession(sessionId: String) -> Bool {
+        guard let url = transcriptURL(for: sessionId),
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            return false
+        }
+
+        defer { try? handle.close() }
+
+        guard let lineData = try? handle.read(upToCount: 8192),
+              let firstLine = String(data: lineData, encoding: .utf8)?
+                .split(whereSeparator: \.isNewline)
+                .first,
+              let jsonData = firstLine.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              raw["type"] as? String == "session_meta",
+              let payload = raw["payload"] as? [String: Any] else {
+            return false
+        }
+
+        if payload["agent_nickname"] as? String != nil || payload["agent_role"] as? String != nil {
+            return true
+        }
+
+        if payload["forked_from_id"] as? String != nil {
+            return true
+        }
+
+        if let source = payload["source"] as? [String: Any],
+           source["subagent"] != nil {
+            return true
+        }
+
+        return false
+    }
+
     private static func transcriptURL(for sessionId: String) -> URL? {
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions", isDirectory: true)

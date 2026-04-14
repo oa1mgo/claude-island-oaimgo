@@ -221,11 +221,17 @@ actor SessionStore {
         )
     }
 
+    private func shouldIgnoreCodexSession(_ sessionId: String) -> Bool {
+        CodexTranscriptParser.isSubagentSession(sessionId: sessionId)
+    }
+
     private func processCodexSessionStart(sessionId: String, cwd: String) {
+        guard !shouldIgnoreCodexSession(sessionId) else { return }
         let isNewSession = sessions[sessionId] == nil
         var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
         enrichCodexRuntimeMetadata(session: &session)
         session.lastActivity = Date()
+        session.completionNotificationAt = nil
         if isNewSession || !session.phase.isActive {
             session.phase = .idle
         }
@@ -237,6 +243,7 @@ actor SessionStore {
     }
 
     private func processCodexPromptSubmitted(sessionId: String, cwd: String, prompt: String?) {
+        guard !shouldIgnoreCodexSession(sessionId) else { return }
         var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
         let now = Date()
         let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -244,6 +251,7 @@ actor SessionStore {
 
         enrichCodexRuntimeMetadata(session: &session)
         session.lastActivity = now
+        session.completionNotificationAt = nil
         session.phase = .processing
         if let trimmedPrompt, !trimmedPrompt.isEmpty {
             session.chatItems.append(
@@ -268,12 +276,14 @@ actor SessionStore {
     }
 
     private func processCodexBashStarted(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?) {
+        guard !shouldIgnoreCodexSession(sessionId) else { return }
         var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
         let now = Date()
         let toolId = toolUseId ?? makeCodexToolId(for: sessionId)
 
         enrichCodexRuntimeMetadata(session: &session)
         session.lastActivity = now
+        session.completionNotificationAt = nil
         session.phase = .processing
         session.toolTracker.startTool(id: toolId, name: toolName)
 
@@ -307,6 +317,7 @@ actor SessionStore {
     }
 
     private func processCodexBashFinished(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?) {
+        guard !shouldIgnoreCodexSession(sessionId) else { return }
         var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
         let now = Date()
 
@@ -333,10 +344,13 @@ actor SessionStore {
     }
 
     private func processCodexStop(sessionId: String, cwd: String) {
+        guard !shouldIgnoreCodexSession(sessionId) else { return }
         var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        let hadRunningTools = hasRunningTools(in: session)
         enrichCodexRuntimeMetadata(session: &session)
         session.lastActivity = Date()
         session.phase = .idle
+        session.completionNotificationAt = hadRunningTools ? nil : Date()
 
         for index in session.chatItems.indices {
             if case .toolCall(var tool) = session.chatItems[index].type, tool.status == .running {
