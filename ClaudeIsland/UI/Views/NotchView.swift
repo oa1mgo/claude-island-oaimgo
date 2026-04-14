@@ -240,6 +240,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            syncInstancesPageLayoutState()
             handleProcessingChange()
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
@@ -253,10 +254,12 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            syncInstancesPageLayoutState()
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
         .onChange(of: musicManager.playbackState) { _, _ in
+            syncInstancesPageLayoutState()
             handleProcessingChange()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
@@ -526,6 +529,16 @@ struct NotchView: View {
         }
 
         return total / CGFloat(samples.count)
+    }
+
+    private func syncInstancesPageLayoutState() {
+        let sessionCount = sessionMonitor.instances.count
+        let hasSessions = sessionCount > 0
+        let showsMusic = musicManager.isVisible
+
+        viewModel.instancesPageHasSessions = hasSessions
+        viewModel.instancesPageSessionCount = sessionCount
+        viewModel.instancesPageShowsMusic = showsMusic
     }
 
     // MARK: - Event Handlers

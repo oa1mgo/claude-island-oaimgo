@@ -13,10 +13,43 @@ struct ClaudeInstancesView: View {
     @ObservedObject var viewModel: NotchViewModel
     @ObservedObject var musicManager: MusicManager
 
+    @State private var instanceRowHeight: CGFloat = 0
+    @State private var musicCardHeight: CGFloat = 0
+
+    private var showsMusicCard: Bool { musicManager.isVisible }
+
+    private var maxInstancesListHeight: CGFloat {
+        InstancesListLayout.maxListHeight(
+            rowHeight: instanceRowHeight
+        )
+    }
+
+    private var resolvedInstancesListMaxHeight: CGFloat? {
+        instanceRowHeight > 0 ? maxInstancesListHeight : nil
+    }
+
+    private var measuredListHeight: CGFloat? {
+        guard instanceRowHeight > 0 else { return nil }
+
+        return InstancesListLayout.listHeight(
+            rowHeight: instanceRowHeight,
+            sessionCount: sortedInstances.count
+        )
+    }
+
+    private var appliedInstancesListHeight: CGFloat? {
+        guard let measuredListHeight else { return nil }
+        return InstancesListLayout.appliedListHeight(
+            contentHeight: measuredListHeight,
+            maxHeight: maxInstancesListHeight
+        )
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            if musicManager.isVisible {
+            if showsMusicCard {
                 MusicCardView(musicManager: musicManager)
+                    .measureHeight(using: MusicCardHeightKey.self) { musicCardHeight = $0 }
             }
 
             if sessionMonitor.instances.isEmpty {
@@ -25,24 +58,44 @@ struct ClaudeInstancesView: View {
                 instancesList
             }
         }
+        .onAppear {
+            syncLayoutMetrics()
+        }
+        .onChange(of: musicManager.isVisible) { _, _ in
+            syncLayoutMetrics()
+        }
+        .onChange(of: musicCardHeight) { _, _ in
+            syncLayoutMetrics()
+        }
+        .onChange(of: instanceRowHeight) { _, _ in
+            syncLayoutMetrics()
+        }
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             Text("No sessions")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.4))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white.opacity(0.58))
 
-            Text("Run claude in terminal")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.25))
-            Text("or start a codex session")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.18))
+            Text("Run claude in terminal or start a codex session")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.26))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 220)
+                .padding(.top, 10)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .multilineTextAlignment(.center)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: InstancesListLayout.emptyStateHeight,
+            maxHeight: InstancesListLayout.emptyStateHeight,
+            alignment: .center
+        )
     }
 
     // MARK: - Instances List
@@ -78,7 +131,7 @@ struct ClaudeInstancesView: View {
     private var instancesList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 2) {
-                ForEach(sortedInstances) { session in
+                ForEach(Array(sortedInstances.enumerated()), id: \.element.stableId) { index, session in
                     InstanceRow(
                         session: session,
                         onFocus: { focusSession(session) },
@@ -87,12 +140,18 @@ struct ClaudeInstancesView: View {
                         onApprove: { approveSession(session) },
                         onReject: { rejectSession(session) }
                     )
+                    .measureHeight(using: InstanceRowHeightKey.self) {
+                        if index == 0 {
+                            instanceRowHeight = $0
+                        }
+                    }
                     .id(session.stableId)
                 }
             }
             .padding(.vertical, 4)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .frame(maxHeight: resolvedInstancesListMaxHeight)
     }
 
     // MARK: - Actions
@@ -123,6 +182,94 @@ struct ClaudeInstancesView: View {
 
     private func archiveSession(_ session: SessionState) {
         sessionMonitor.archiveSession(sessionId: session.sessionId)
+    }
+}
+
+private enum InstancesListLayout {
+    static let targetVisibleRows: CGFloat = 3.2
+    static let contentSpacing: CGFloat = 8
+    static let listRowSpacing: CGFloat = 2
+    static let listVerticalPadding: CGFloat = 4
+    static let emptyStateHeight: CGFloat = 84
+
+    static func maxListHeight(rowHeight: CGFloat) -> CGFloat {
+        listHeight(rowHeight: rowHeight, visibleRows: targetVisibleRows)
+    }
+
+    static func listHeight(rowHeight: CGFloat, sessionCount: Int) -> CGFloat {
+        listHeight(
+            rowHeight: rowHeight,
+            visibleRows: min(CGFloat(max(0, sessionCount)), targetVisibleRows)
+        )
+    }
+
+    static func appliedListHeight(
+        contentHeight: CGFloat,
+        maxHeight: CGFloat
+    ) -> CGFloat {
+        min(max(0, contentHeight), max(0, maxHeight))
+    }
+
+    private static func listHeight(rowHeight: CGFloat, visibleRows: CGFloat) -> CGFloat {
+        let clampedVisibleRows = max(0, visibleRows)
+        let visibleRowsHeight = max(0, rowHeight) * clampedVisibleRows
+        let visibleSpacingCount = max(0, ceil(clampedVisibleRows) - 1)
+        let spacingHeight = listRowSpacing * visibleSpacingCount
+        let verticalPaddingHeight = listVerticalPadding * 2
+        return visibleRowsHeight + spacingHeight + verticalPaddingHeight
+    }
+}
+
+private struct InstanceRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct MusicCardHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct MeasuredHeightReader<Key: PreferenceKey>: ViewModifier where Key.Value == CGFloat {
+    let onChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: Key.self, value: proxy.size.height)
+                }
+            )
+            .onPreferenceChange(Key.self, perform: onChange)
+    }
+}
+
+private extension View {
+    func measureHeight<Key: PreferenceKey>(
+        using _: Key.Type,
+        _ onChange: @escaping (CGFloat) -> Void
+    ) -> some View where Key.Value == CGFloat {
+        modifier(MeasuredHeightReader<Key>(onChange: onChange))
+    }
+}
+
+private extension ClaudeInstancesView {
+    func syncLayoutMetrics() {
+        guard viewModel.contentType == .instances else { return }
+
+        if abs(viewModel.instancesPageRowHeight - instanceRowHeight) > 0.5 {
+            viewModel.instancesPageRowHeight = instanceRowHeight
+        }
+
+        if abs(viewModel.instancesPageMusicCardHeight - musicCardHeight) > 0.5 {
+            viewModel.instancesPageMusicCardHeight = musicCardHeight
+        }
     }
 }
 

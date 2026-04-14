@@ -45,6 +45,11 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    @Published var instancesPageHasSessions: Bool = false
+    @Published var instancesPageSessionCount: Int = 0
+    @Published var instancesPageShowsMusic: Bool = false
+    @Published var instancesPageRowHeight: CGFloat = 0
+    @Published var instancesPageMusicCardHeight: CGFloat = 0
 
     // MARK: - Dependencies
 
@@ -85,7 +90,7 @@ class NotchViewModel: ObservableObject {
         case .instances:
             return CGSize(
                 width: min(screenRect.width * 0.4, 480),
-                height: 320
+                height: instancesPageOpenedHeight
             )
         }
     }
@@ -101,6 +106,18 @@ class NotchViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let events = EventMonitors.shared
     private var hoverTimer: DispatchWorkItem?
+
+    private enum InstancesPageLayout {
+        static let contentSpacing: CGFloat = 8
+        static let targetVisibleRows: CGFloat = 3.2
+        static let listRowSpacing: CGFloat = 2
+        static let listVerticalPadding: CGFloat = 4
+        static let emptyStateHeight: CGFloat = 84
+        static let emptyHeight: CGFloat = 112
+        static let emptyHeightWithMusic: CGFloat = 228
+        static let fallbackRowHeight: CGFloat = 58
+        static let fallbackMusicBlockHeight: CGFloat = emptyHeightWithMusic - emptyHeight
+    }
 
     // MARK: - Initialization
 
@@ -127,6 +144,42 @@ class NotchViewModel: ObservableObject {
         claudeDirSelector.$isPickerExpanded
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+    }
+
+    private var instancesPageOpenedHeight: CGFloat {
+        let chromeHeight = InstancesPageLayout.emptyHeight - InstancesPageLayout.emptyStateHeight
+        let musicBlockHeight: CGFloat = instancesPageShowsMusic
+            ? resolvedMusicCardHeight + InstancesPageLayout.contentSpacing
+            : 0
+
+        let contentHeight: CGFloat
+        if instancesPageSessionCount > 0 {
+            contentHeight = listHeight(
+                rowHeight: resolvedRowHeight,
+                visibleRows: min(CGFloat(instancesPageSessionCount), InstancesPageLayout.targetVisibleRows)
+            )
+        } else {
+            contentHeight = InstancesPageLayout.emptyStateHeight
+        }
+
+        return chromeHeight + musicBlockHeight + contentHeight
+    }
+
+    private var resolvedRowHeight: CGFloat {
+        max(instancesPageRowHeight, InstancesPageLayout.fallbackRowHeight)
+    }
+
+    private var resolvedMusicCardHeight: CGFloat {
+        max(instancesPageMusicCardHeight, InstancesPageLayout.fallbackMusicBlockHeight - InstancesPageLayout.contentSpacing)
+    }
+
+    private func listHeight(rowHeight: CGFloat, visibleRows: CGFloat) -> CGFloat {
+        let clampedVisibleRows = max(0, visibleRows)
+        let visibleRowsHeight = rowHeight * clampedVisibleRows
+        let visibleSpacingCount = max(0, ceil(clampedVisibleRows) - 1)
+        let spacingHeight = InstancesPageLayout.listRowSpacing * visibleSpacingCount
+        let verticalPaddingHeight = InstancesPageLayout.listVerticalPadding * 2
+        return visibleRowsHeight + spacingHeight + verticalPaddingHeight
     }
 
     // MARK: - Event Handling

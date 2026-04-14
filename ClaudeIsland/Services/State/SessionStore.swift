@@ -50,6 +50,10 @@ actor SessionStore {
         sessionsSubject.eraseToAnyPublisher()
     }
 
+    private nonisolated var mixpanel: MixpanelInstance? {
+        Mixpanel.safeMainInstance()
+    }
+
     // MARK: - Initialization
 
     private init() {}
@@ -147,7 +151,7 @@ actor SessionStore {
 
         // Track new session in Mixpanel
         if isNewSession {
-            Mixpanel.mainInstance().track(event: "Session Started")
+            mixpanel?.track(event: "Session Started")
         }
 
         session.pid = event.pid
@@ -228,7 +232,7 @@ actor SessionStore {
         sessions[sessionId] = session
 
         if isNewSession {
-            Mixpanel.mainInstance().track(event: "Session Started", properties: ["provider": "codex"])
+            mixpanel?.track(event: "Session Started", properties: ["provider": "codex"])
         }
     }
 

@@ -9,6 +9,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     static var shared: AppDelegate?
 
+    private var mixpanel: MixpanelInstance? {
+        Mixpanel.safeMainInstance()
+    }
+
     var windowController: NotchWindowController? {
         windowManager?.windowController
     }
@@ -27,13 +31,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Mixpanel.initialize(token: "49814c1436104ed108f3fc4735228496")
 
         let distinctId = getOrCreateDistinctId()
-        Mixpanel.mainInstance().identify(distinctId: distinctId)
+        mixpanel?.identify(distinctId: distinctId)
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
         let osVersion = Foundation.ProcessInfo.processInfo.operatingSystemVersionString
 
-        Mixpanel.mainInstance().registerSuperProperties([
+        mixpanel?.registerSuperProperties([
             "app_version": version,
             "build_number": build,
             "macos_version": osVersion
@@ -41,14 +45,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         fetchAndRegisterClaudeVersion()
 
-        Mixpanel.mainInstance().people.set(properties: [
+        mixpanel?.people.set(properties: [
             "app_version": version,
             "build_number": build,
             "macos_version": osVersion
         ])
 
-        Mixpanel.mainInstance().track(event: "App Launched")
-        Mixpanel.mainInstance().flush()
+        mixpanel?.track(event: "App Launched")
+        mixpanel?.flush()
 
         HookInstaller.installIfNeeded()
         CodexHookInstaller.installIfNeeded()
@@ -68,7 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        Mixpanel.mainInstance().flush()
+        mixpanel?.flush()
         screenObserver = nil
     }
 
@@ -142,8 +146,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let version = json["version"] as? String else { continue }
 
-            Mixpanel.mainInstance().registerSuperProperties(["claude_code_version": version])
-            Mixpanel.mainInstance().people.set(properties: ["claude_code_version": version])
+            mixpanel?.registerSuperProperties(["claude_code_version": version])
+            mixpanel?.people.set(properties: ["claude_code_version": version])
             return
         }
     }
