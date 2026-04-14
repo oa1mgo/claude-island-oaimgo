@@ -30,17 +30,27 @@ struct NotchView: View {
 
     @Namespace private var activityNamespace
 
-    /// Whether any Claude session is currently processing or compacting
+    /// Whether any tracked session is currently processing or compacting
     private var isAnyProcessing: Bool {
         sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
     }
 
-    /// Whether any Claude session has a pending permission request
+    private var activeProcessingActivityType: NotchActivityType? {
+        if sessionMonitor.instances.contains(where: { $0.provider == .claude && ($0.phase == .processing || $0.phase == .compacting) }) {
+            return .claude
+        }
+        if sessionMonitor.instances.contains(where: { $0.provider == .codex && $0.phase == .processing }) {
+            return .codex
+        }
+        return nil
+    }
+
+    /// Whether any tracked session has a pending permission request
     private var hasPendingPermission: Bool {
         sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
     }
 
-    /// Whether any Claude session is waiting for user input (done/ready state) within the display window
+    /// Whether any tracked session is waiting for user input (done/ready state) within the display window
     private var hasWaitingForInput: Bool {
         let now = Date()
         let displayDuration: TimeInterval = 30  // Show checkmark for 30 seconds
@@ -77,6 +87,9 @@ struct NotchView: View {
         if activityCoordinator.expandingActivity.show {
             switch activityCoordinator.expandingActivity.type {
             case .claude:
+                let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
+                return baseWidth + permissionIndicatorWidth
+            case .codex:
                 let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
                 return baseWidth + permissionIndicatorWidth
             case .none:
@@ -220,7 +233,21 @@ struct NotchView: View {
     // MARK: - Notch Layout
 
     private var isProcessing: Bool {
-        activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
+        activityCoordinator.expandingActivity.show &&
+            (activityCoordinator.expandingActivity.type == .claude || activityCoordinator.expandingActivity.type == .codex)
+    }
+
+    private var isCodexProcessing: Bool {
+        activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .codex
+    }
+
+    private var activityTint: Color {
+        switch activityCoordinator.expandingActivity.type {
+        case .codex:
+            return Color(red: 0.34, green: 0.64, blue: 0.98)
+        case .claude, .none:
+            return Color(red: 0.85, green: 0.47, blue: 0.34)
+        }
     }
 
     private var showMusicActivity: Bool {
@@ -272,8 +299,13 @@ struct NotchView: View {
             // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
             if showClosedActivity {
                 HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    if isCodexProcessing {
+                        CodexPulseIcon(size: 14, color: activityTint, isAnimating: true)
+                            .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    } else {
+                        ClaudeCrabIcon(size: 14, color: activityTint, animateLegs: isProcessing)
+                            .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    }
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
@@ -304,7 +336,7 @@ struct NotchView: View {
             // Right side - spinner when processing/pending, checkmark when waiting for input
             if showClosedActivity {
                 if isProcessing || hasPendingPermission {
-                    ProcessingSpinner()
+                    ProcessingSpinner(color: activityTint)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
                         .padding(.trailing, viewModel.status == .opened ? 0 : 4)
@@ -333,9 +365,15 @@ struct NotchView: View {
             // Show static crab only if not showing activity in headerRow
             // (headerRow handles crab + indicator when showClosedActivity is true)
             if !showClosedActivity {
-                ClaudeCrabIcon(size: 14)
-                    .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
-                    .padding(.leading, 8)
+                if activityCoordinator.expandingActivity.type == .codex {
+                    CodexPulseIcon(size: 14, color: Color(red: 0.34, green: 0.64, blue: 0.98))
+                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
+                        .padding(.leading, 8)
+                } else {
+                    ClaudeCrabIcon(size: 14)
+                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
+                        .padding(.leading, 8)
+                }
             }
 
             Spacer()
@@ -400,8 +438,9 @@ struct NotchView: View {
 
     private func handleProcessingChange() {
         if isAnyProcessing || hasPendingPermission {
-            // Show claude activity when processing or waiting for permission
-            activityCoordinator.showActivity(type: .claude)
+            // Claude approval remains Claude-styled; otherwise follow the active provider.
+            let activityType: NotchActivityType = hasPendingPermission ? .claude : (activeProcessingActivityType ?? .claude)
+            activityCoordinator.showActivity(type: activityType)
             isVisible = true
         } else if showMusicActivity {
             activityCoordinator.hideActivity()

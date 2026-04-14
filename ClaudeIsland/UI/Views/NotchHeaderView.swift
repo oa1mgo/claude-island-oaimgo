@@ -92,6 +92,74 @@ struct ClaudeCrabIcon: View {
     }
 }
 
+struct CodexPulseIcon: View {
+    let size: CGFloat
+    let color: Color
+    var isAnimating: Bool = false
+
+    @State private var phase: Int = 0
+    private let timer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+
+    init(size: CGFloat = 16, color: Color = Color(red: 0.34, green: 0.64, blue: 0.98), isAnimating: Bool = false) {
+        self.size = size
+        self.color = color
+        self.isAnimating = isAnimating
+    }
+
+    private let shellPixels: [(CGFloat, CGFloat)] = [
+        (4, 4), (8, 4), (12, 4), (16, 4), (20, 4),
+        (4, 8), (20, 8),
+        (4, 12), (20, 12),
+        (4, 16), (20, 16),
+        (4, 20), (8, 20), (12, 20), (16, 20), (20, 20)
+    ]
+
+    private let coreFrames: [[(CGFloat, CGFloat)]] = [
+        [(8, 8), (12, 8), (16, 8), (12, 12), (12, 16)],
+        [(8, 8), (16, 8), (8, 16), (16, 16), (12, 12)],
+        [(12, 8), (8, 12), (16, 12), (12, 16), (12, 12)],
+        [(8, 8), (12, 8), (16, 8), (8, 16), (16, 16)]
+    ]
+
+    var body: some View {
+        Canvas { context, _ in
+            let scale = size / 24.0
+            let pixelSize: CGFloat = 4 * scale
+            let glowColor = color.opacity(isAnimating ? 0.35 : 0.2)
+
+            for (x, y) in shellPixels {
+                let rect = CGRect(
+                    x: x * scale - pixelSize / 2,
+                    y: y * scale - pixelSize / 2,
+                    width: pixelSize,
+                    height: pixelSize
+                )
+                context.fill(Path(roundedRect: rect.insetBy(dx: -0.4, dy: -0.4), cornerRadius: pixelSize * 0.18), with: .color(glowColor))
+                context.fill(Path(rect), with: .color(color))
+            }
+
+            let frame = coreFrames[phase % coreFrames.count]
+            for (x, y) in frame {
+                let intensity = isAnimating ? 1.0 : 0.75
+                let rect = CGRect(
+                    x: x * scale - pixelSize / 2,
+                    y: y * scale - pixelSize / 2,
+                    width: pixelSize,
+                    height: pixelSize
+                )
+                context.fill(Path(roundedRect: rect.insetBy(dx: -0.8, dy: -0.8), cornerRadius: pixelSize * 0.22), with: .color(color.opacity(0.32 * intensity)))
+                context.fill(Path(rect), with: .color(color.opacity(intensity)))
+            }
+        }
+        .frame(width: size, height: size)
+        .onReceive(timer) { _ in
+            if isAnimating {
+                phase = (phase + 1) % coreFrames.count
+            }
+        }
+    }
+}
+
 // Pixel art permission indicator icon
 struct PermissionIndicatorIcon: View {
     let size: CGFloat
@@ -169,4 +237,3 @@ struct ReadyForInputIndicatorIcon: View {
         .frame(width: size, height: size)
     }
 }
-

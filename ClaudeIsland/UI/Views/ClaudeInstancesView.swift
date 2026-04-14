@@ -38,6 +38,9 @@ struct ClaudeInstancesView: View {
             Text("Run claude in terminal")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
+            Text("or start a codex session")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.18))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -134,12 +137,18 @@ struct InstanceRow: View {
     let onReject: () -> Void
 
     @State private var isHovered = false
-    @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
 
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
-    private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
-    private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+
+    private var providerTint: Color {
+        switch session.provider {
+        case .claude:
+            return claudeOrange
+        case .codex:
+            return Color(red: 0.47, green: 0.76, blue: 0.95)
+        }
+    }
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -183,6 +192,14 @@ struct InstanceRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                         .lineLimit(1)
+
+                    Text(session.provider.displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(providerTint)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(providerTint.opacity(0.14))
+                        .clipShape(Capsule())
 
                     // Token usage indicator
                     if session.usage.totalTokens > 0 {
@@ -336,19 +353,9 @@ struct InstanceRow: View {
     private var stateIndicator: some View {
         switch session.phase {
         case .processing, .compacting:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(claudeOrange)
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
+            ProcessingSpinner(color: providerTint)
         case .waitingForApproval:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(TerminalColors.amber)
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
+            ProcessingSpinner(color: TerminalColors.amber)
         case .waitingForInput:
             Circle()
                 .fill(TerminalColors.green)
