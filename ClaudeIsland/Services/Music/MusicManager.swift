@@ -13,10 +13,32 @@ final class MusicManager: ObservableObject {
         NSColor.white.withAlphaComponent(0.75),
         NSColor.white.withAlphaComponent(0.55)
     ]
+    @Published private(set) var sourceApp: SourceApp?
 
     private var cancellables = Set<AnyCancellable>()
+    private var sourceAppCache: [String: SourceApp] = [:]
     private let controller: MediaControllerProtocol
     private let ciContext = CIContext(options: nil)
+
+    struct SourceApp {
+        let bundleIdentifier: String
+        let displayName: String
+        let icon: NSImage?
+    }
+
+    private static let defaultArtworkGradient: [NSColor] = [
+        NSColor.white.withAlphaComponent(0.95),
+        NSColor.white.withAlphaComponent(0.75),
+        NSColor.white.withAlphaComponent(0.55)
+    ]
+
+    private static let sourceAppDisplayNameOverrides: [String: String] = [
+        "com.apple.Music": "Apple Music",
+        "com.tencent.qqmusic": "QQ Music",
+        "com.tencent.qqmusicmac": "QQ Music",
+        "com.microsoft.edgemac": "Microsoft Edge",
+        "com.microsoft.microsoftedge": "Microsoft Edge"
+    ]
 
     init(controller: MediaControllerProtocol? = nil) {
         self.controller = controller ?? NowPlayingController()
@@ -24,14 +46,13 @@ final class MusicManager: ObservableObject {
         self.controller.playbackStatePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                self?.playbackState = state
+                guard let self else { return }
+
+                self.playbackState = state
                 let image = state.artworkData.flatMap(NSImage.init(data:))
-                self?.albumArt = image
-                self?.artworkGradient = self?.gradientColors(from: image) ?? [
-                    NSColor.white.withAlphaComponent(0.95),
-                    NSColor.white.withAlphaComponent(0.75),
-                    NSColor.white.withAlphaComponent(0.55)
-                ]
+                self.albumArt = image
+                self.artworkGradient = self.gradientColors(from: image)
+                self.sourceApp = self.resolveSourceApp(bundleIdentifier: state.bundleIdentifier)
             }
             .store(in: &cancellables)
 
@@ -57,26 +78,112 @@ final class MusicManager: ObservableObject {
     func previousTrack() { controller.previousTrack() }
     func openSourceApp() { controller.openSourceApp() }
 
+    private func resolveSourceApp(bundleIdentifier: String?) -> SourceApp? {
+        let trimmedBundleIdentifier = bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let bundleIdentifier = trimmedBundleIdentifier, !bundleIdentifier.isEmpty else {
+            return nil
+        }
+
+        if let cached = sourceAppCache[bundleIdentifier] {
+            return cached
+        }
+
+        guard let displayName = resolveDisplayName(for: bundleIdentifier) else {
+            return nil
+        }
+
+        let resolved = SourceApp(
+            bundleIdentifier: bundleIdentifier,
+            displayName: displayName,
+            icon: resolveIcon(for: bundleIdentifier)
+        )
+        sourceAppCache[bundleIdentifier] = resolved
+        return resolved
+    }
+
+    private func resolveDisplayName(for bundleIdentifier: String) -> String? {
+        if let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            if let resolvedName = resolvedBundleDisplayName(at: applicationURL, bundleIdentifier: bundleIdentifier) {
+                return resolvedName
+            }
+        }
+
+        return fallbackDisplayName(for: bundleIdentifier).map {
+            overrideDisplayNameIfNeeded($0, bundleIdentifier: bundleIdentifier)
+        }
+    }
+
+    private func resolveIcon(for bundleIdentifier: String) -> NSImage? {
+        if let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            return NSWorkspace.shared.icon(forFile: applicationURL.path)
+        }
+        return nil
+    }
+
+    private func resolvedBundleDisplayName(at applicationURL: URL, bundleIdentifier: String) -> String? {
+        if let bundle = Bundle(url: applicationURL) {
+            let bundleKeys = ["CFBundleDisplayName", "CFBundleName"]
+            for key in bundleKeys {
+                if let value = bundle.object(forInfoDictionaryKey: key) as? String {
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        return overrideDisplayNameIfNeeded(trimmed, bundleIdentifier: bundleIdentifier)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private func overrideDisplayNameIfNeeded(_ displayName: String, bundleIdentifier: String) -> String {
+        Self.sourceAppDisplayNameOverrides[bundleIdentifier] ?? displayName
+    }
+
+    private func runningApplication(for bundleIdentifier: String) -> NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    private func fallbackDisplayName(for bundleIdentifier: String) -> String? {
+        let rawName = bundleIdentifier
+            .split(separator: ".")
+            .last
+            .map(String.init) ?? bundleIdentifier
+
+        let normalized = rawName
+            .replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return nil
+        }
+
+        let strippedSuffixes = [" mac", " stable", " beta", " canary", " insiders"]
+        let cleaned = strippedSuffixes.reduce(normalized) { partialResult, suffix in
+            partialResult.hasSuffix(suffix) ? String(partialResult.dropLast(suffix.count)) : partialResult
+        }
+
+        let displayName = cleaned
+            .split(separator: " ")
+            .map { segment in segment.prefix(1).uppercased() + segment.dropFirst() }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return displayName.isEmpty ? nil : displayName
+    }
+
     private func gradientColors(from image: NSImage?) -> [NSColor] {
         guard
             let image,
             let tiffData = image.tiffRepresentation,
             let ciImage = CIImage(data: tiffData)
         else {
-            return [
-                NSColor.white.withAlphaComponent(0.95),
-                NSColor.white.withAlphaComponent(0.75),
-                NSColor.white.withAlphaComponent(0.55)
-            ]
+            return Self.defaultArtworkGradient
         }
 
         let extent = ciImage.extent
         guard !extent.isEmpty else {
-            return [
-                NSColor.white.withAlphaComponent(0.95),
-                NSColor.white.withAlphaComponent(0.75),
-                NSColor.white.withAlphaComponent(0.55)
-            ]
+            return Self.defaultArtworkGradient
         }
 
         let regions = [
@@ -99,11 +206,7 @@ final class MusicManager: ObservableObject {
             ]
         }
 
-        return [
-            NSColor.white.withAlphaComponent(0.95),
-            NSColor.white.withAlphaComponent(0.75),
-            NSColor.white.withAlphaComponent(0.55)
-        ]
+        return Self.defaultArtworkGradient
     }
 
     private func averageColor(in image: CIImage, region: CGRect) -> NSColor? {

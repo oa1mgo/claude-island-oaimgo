@@ -5,7 +5,7 @@ struct MusicCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            artwork
+            artworkColumn
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .center, spacing: 12) {
@@ -81,6 +81,14 @@ private extension MusicCardView {
         return "Unknown Artist"
     }
 
+    var artworkColumn: some View {
+        VStack(spacing: 6) {
+            artwork
+            sourceBadge
+        }
+        .frame(width: 88)
+    }
+
     var artwork: some View {
         Button(action: musicManager.openSourceApp) {
             Group {
@@ -99,6 +107,37 @@ private extension MusicCardView {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    var sourceBadge: some View {
+        if let sourceApp = musicManager.sourceApp {
+            Button(action: musicManager.openSourceApp) {
+                HStack(spacing: 5) {
+                    if let icon = sourceApp.icon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 12, height: 12)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+
+                    Text(sourceApp.displayName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.72))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.07))
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     var controlsRow: some View {
@@ -144,7 +183,6 @@ private extension MusicCardView {
 
     func trimmedPlaybackText(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
         return trimmed.isEmpty ? nil : trimmed
     }
 
