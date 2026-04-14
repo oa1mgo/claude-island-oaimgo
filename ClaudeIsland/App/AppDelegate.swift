@@ -51,6 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Mixpanel.mainInstance().flush()
 
         HookInstaller.installIfNeeded()
+        CodexHookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
 
         windowManager = WindowManager()

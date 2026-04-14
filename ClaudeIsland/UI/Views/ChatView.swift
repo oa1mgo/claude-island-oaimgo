@@ -24,6 +24,8 @@ struct ChatView: View {
     @State private var newMessageCount: Int = 0
     @State private var previousHistoryCount: Int = 0
     @State private var isBottomVisible: Bool = true
+    @State private var codexTranscriptHistory: [ChatHistoryItem] = []
+    @State private var isRefreshingCodexHistory: Bool = false
     @FocusState private var isInputFocused: Bool
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
@@ -33,9 +35,17 @@ struct ChatView: View {
         self._viewModel = ObservedObject(wrappedValue: viewModel)
         self._session = State(initialValue: initialSession)
 
-        // Initialize from cache if available (prevents loading flicker on view recreation)
-        let cachedHistory = ChatHistoryManager.shared.history(for: sessionId)
-        let alreadyLoaded = !cachedHistory.isEmpty
+        // Codex sessions currently source their visible history from SessionStore
+        // rather than the Claude JSONL-backed ChatHistoryManager path.
+        let cachedHistory: [ChatHistoryItem]
+        let alreadyLoaded: Bool
+        if initialSession.provider == .codex {
+            cachedHistory = initialSession.chatItems
+            alreadyLoaded = false
+        } else {
+            cachedHistory = ChatHistoryManager.shared.history(for: sessionId)
+            alreadyLoaded = !cachedHistory.isEmpty
+        }
         self._history = State(initialValue: cachedHistory)
         self._isLoading = State(initialValue: !alreadyLoaded)
         self._hasLoadedOnce = State(initialValue: alreadyLoaded)
@@ -96,6 +106,11 @@ struct ChatView: View {
             guard !hasLoadedOnce else { return }
             hasLoadedOnce = true
 
+            if session.provider == .codex {
+                await refreshCodexHistory(using: session)
+                return
+            }
+
             // Check if already loaded (from previous visit)
             if ChatHistoryManager.shared.isLoaded(sessionId: sessionId) {
                 history = ChatHistoryManager.shared.history(for: sessionId)
@@ -112,6 +127,7 @@ struct ChatView: View {
             }
         }
         .onReceive(ChatHistoryManager.shared.$histories) { histories in
+            guard session.provider == .claude else { return }
             // Update when count changes, last item differs, or content changes (e.g., tool status)
             if let newHistory = histories[sessionId] {
                 let countChanged = newHistory.count != history.count
@@ -150,6 +166,24 @@ struct ChatView: View {
                 let wasWaiting = isWaitingForApproval
                 session = updated
                 let isNowProcessing = updated.phase == .processing
+
+                if updated.provider == .codex {
+                    let previousCount = history.count
+                    history = mergedCodexHistory(
+                        transcriptItems: codexTranscriptHistory,
+                        liveItems: updated.chatItems
+                    )
+                    if isLoading {
+                        isLoading = false
+                    }
+                    if !isAutoscrollPaused && history.count > previousCount {
+                        shouldScrollToBottom = true
+                    }
+
+                    Task {
+                        await refreshCodexHistory(using: updated)
+                    }
+                }
 
                 if wasWaiting && isNowProcessing {
                     // Scroll to bottom after permission accepted (with slight delay)
@@ -238,6 +272,94 @@ struct ChatView: View {
         return ""
     }
 
+    private func mergedCodexHistory(
+        transcriptItems: [ChatHistoryItem],
+        liveItems: [ChatHistoryItem]
+    ) -> [ChatHistoryItem] {
+        guard !transcriptItems.isEmpty else { return liveItems }
+
+        var merged = transcriptItems
+
+        for item in liveItems {
+            guard case .toolCall(let liveTool) = item.type else { continue }
+
+            let isDuplicate = merged.contains { existing in
+                guard case .toolCall(let existingTool) = existing.type else { return false }
+                return existingTool.name == liveTool.name &&
+                    existingTool.input == liveTool.input &&
+                    abs(existing.timestamp.timeIntervalSince(item.timestamp)) < 2
+            }
+
+            guard !isDuplicate else { continue }
+            merged.append(item)
+        }
+
+        return merged.sorted {
+            if $0.timestamp == $1.timestamp {
+                return $0.id < $1.id
+            }
+            return $0.timestamp < $1.timestamp
+        }
+    }
+
+    @MainActor
+    private func applyCodexHistoryRefresh(
+        transcriptItems: [ChatHistoryItem],
+        liveItems: [ChatHistoryItem]
+    ) {
+        let previousCount = history.count
+        codexTranscriptHistory = transcriptItems
+        history = mergedCodexHistory(transcriptItems: transcriptItems, liveItems: liveItems)
+
+        if isLoading {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isLoading = false
+            }
+        }
+
+        if !isAutoscrollPaused && history.count > previousCount {
+            shouldScrollToBottom = true
+        }
+    }
+
+    private func refreshCodexHistory(using liveSession: SessionState) async {
+        guard liveSession.provider == .codex else { return }
+
+        let shouldStart = await MainActor.run { () -> Bool in
+            if isRefreshingCodexHistory {
+                return false
+            }
+            isRefreshingCodexHistory = true
+            return true
+        }
+        guard shouldStart else { return }
+
+        let transcriptItems = await CodexTranscriptParser.loadHistory(sessionId: sessionId)
+
+        await MainActor.run {
+            applyCodexHistoryRefresh(transcriptItems: transcriptItems, liveItems: liveSession.chatItems)
+            isRefreshingCodexHistory = false
+        }
+    }
+
+    private var chatInputPlaceholder: String {
+        switch session.provider {
+        case .claude:
+            return canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging"
+        case .codex:
+            return canSendMessages ? "Message Codex..." : "Open Codex in tmux to enable messaging"
+        }
+    }
+
+    private var interactivePromptSubtitle: String {
+        switch session.provider {
+        case .claude:
+            return "Claude Code needs your input"
+        case .codex:
+            return "Codex needs your input"
+        }
+    }
+
     // MARK: - Loading State
 
     private var loadingState: some View {
@@ -282,7 +404,7 @@ struct ChatView: View {
 
                     // Processing indicator at bottom (first due to flip)
                     if isProcessing {
-                        ProcessingIndicatorView(turnId: lastUserMessageId)
+                        ProcessingIndicatorView(provider: session.provider, turnId: lastUserMessageId)
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -360,7 +482,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+            TextField(chatInputPlaceholder, text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
@@ -422,6 +544,7 @@ struct ChatView: View {
     /// Bar for interactive tools like AskUserQuestion that need terminal input
     private var interactivePromptBar: some View {
         ChatInteractivePromptBar(
+            provider: session.provider,
             isInTmux: session.isInTmux,
             onGoToTerminal: { focusTerminal() }
         )
@@ -644,15 +767,25 @@ struct AssistantMessageView: View {
 // MARK: - Processing Indicator
 
 struct ProcessingIndicatorView: View {
+    let provider: SessionProvider
     private let baseTexts = ["Processing", "Working"]
-    private let color = Color(red: 0.85, green: 0.47, blue: 0.34) // Claude orange
     private let baseText: String
 
     @State private var dotCount: Int = 1
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
+    private var color: Color {
+        switch provider {
+        case .claude:
+            return Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .codex:
+            return Color(red: 0.35, green: 0.62, blue: 0.96)
+        }
+    }
+
     /// Use a turnId to select text consistently per user turn
-    init(turnId: String = "") {
+    init(provider: SessionProvider, turnId: String = "") {
+        self.provider = provider
         // Use hash of turnId to pick base text consistently for this turn
         let index = abs(turnId.hashValue) % baseTexts.count
         baseText = baseTexts[index]
@@ -664,7 +797,7 @@ struct ProcessingIndicatorView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
-            ProcessingSpinner()
+            ProcessingSpinner(color: color)
                 .frame(width: 6)
 
             Text(baseText + dots)
@@ -1050,6 +1183,7 @@ struct InterruptedMessageView: View {
 
 /// Bar for interactive tools like AskUserQuestion that need terminal input
 struct ChatInteractivePromptBar: View {
+    let provider: SessionProvider
     let isInTmux: Bool
     let onGoToTerminal: () -> Void
 
@@ -1063,7 +1197,7 @@ struct ChatInteractivePromptBar: View {
                 Text(MCPToolFormatter.formatToolName("AskUserQuestion"))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(TerminalColors.amber)
-                Text("Claude Code needs your input")
+                Text(provider == .codex ? "Codex needs your input" : "Claude Code needs your input")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)

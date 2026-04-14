@@ -100,6 +100,9 @@ struct PendingPermission: Sendable {
 /// Callback for hook events
 typealias HookEventHandler = @Sendable (HookEvent) -> Void
 
+/// Callback for Codex hook events
+typealias CodexHookEventHandler = @Sendable (CodexSessionEvent) -> Void
+
 /// Callback for permission response failures (socket died)
 typealias PermissionFailureHandler = @Sendable (_ sessionId: String, _ toolUseId: String) -> Void
 
@@ -112,6 +115,7 @@ class HookSocketServer {
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var eventHandler: HookEventHandler?
+    private var codexEventHandler: CodexHookEventHandler?
     private var permissionFailureHandler: PermissionFailureHandler?
     private let queue = DispatchQueue(label: "com.claudeisland.socket", qos: .userInitiated)
 
@@ -128,16 +132,29 @@ class HookSocketServer {
     private init() {}
 
     /// Start the socket server
-    func start(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil) {
+    func start(
+        onEvent: @escaping HookEventHandler,
+        onPermissionFailure: PermissionFailureHandler? = nil,
+        onCodexEvent: CodexHookEventHandler? = nil
+    ) {
         queue.async { [weak self] in
-            self?.startServer(onEvent: onEvent, onPermissionFailure: onPermissionFailure)
+            self?.startServer(
+                onEvent: onEvent,
+                onPermissionFailure: onPermissionFailure,
+                onCodexEvent: onCodexEvent
+            )
         }
     }
 
-    private func startServer(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler?) {
+    private func startServer(
+        onEvent: @escaping HookEventHandler,
+        onPermissionFailure: PermissionFailureHandler?,
+        onCodexEvent: CodexHookEventHandler?
+    ) {
         guard serverSocket < 0 else { return }
 
         eventHandler = onEvent
+        codexEventHandler = onCodexEvent
         permissionFailureHandler = onPermissionFailure
 
         unlink(Self.socketPath)
@@ -203,6 +220,7 @@ class HookSocketServer {
         acceptSource?.cancel()
         acceptSource = nil
         unlink(Self.socketPath)
+        codexEventHandler = nil
 
         permissionsLock.lock()
         for (_, pending) in pendingPermissions {
@@ -405,12 +423,48 @@ class HookSocketServer {
 
         let data = allData
 
-        guard let event = try? JSONDecoder().decode(HookEvent.self, from: data) else {
+        switch decodeIncomingEvent(from: data) {
+        case .claude(let event):
+            handleClaudeEvent(event, clientSocket: clientSocket)
+
+        case .codex(let event):
+            close(clientSocket)
+            logger.debug("Received Codex event: \(String(describing: event), privacy: .public)")
+            codexEventHandler?(event)
+
+        case .unsupportedCodex(let eventName):
+            close(clientSocket)
+            logger.debug("Ignoring unsupported Codex event: \(eventName, privacy: .public)")
+
+        case .unknown:
             logger.warning("Failed to parse event: \(String(data: data, encoding: .utf8) ?? "?", privacy: .public)")
             close(clientSocket)
-            return
+        }
+    }
+
+    private enum DecodedHookPayload {
+        case claude(HookEvent)
+        case codex(CodexSessionEvent)
+        case unsupportedCodex(eventName: String)
+        case unknown
+    }
+
+    private func decodeIncomingEvent(from data: Data) -> DecodedHookPayload {
+        if let claudeEvent = try? JSONDecoder().decode(HookEvent.self, from: data) {
+            return .claude(claudeEvent)
         }
 
+        if let codexEnvelope = try? JSONDecoder().decode(CodexHookEnvelope.self, from: data) {
+            guard let codexEvent = CodexHookAdapter.adapt(codexEnvelope) else {
+                return .unsupportedCodex(eventName: codexEnvelope.event)
+            }
+            return .codex(codexEvent)
+        }
+
+        return .unknown
+    }
+
+    private func handleClaudeEvent(_ event: HookEvent, clientSocket: Int32) {
         logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
 
         if event.event == "PreToolUse" {

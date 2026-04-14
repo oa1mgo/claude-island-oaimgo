@@ -71,6 +71,22 @@ class ClaudeSessionMonitor: ObservableObject {
                         .permissionSocketFailed(sessionId: sessionId, toolUseId: toolUseId)
                     )
                 }
+            },
+            onCodexEvent: { event in
+                Task {
+                    switch event {
+                    case .sessionStart(let sessionId, let cwd):
+                        await SessionStore.shared.process(.codexSessionStarted(sessionId: sessionId, cwd: cwd))
+                    case .userPromptSubmit(let sessionId, let cwd, let prompt):
+                        await SessionStore.shared.process(.codexPromptSubmitted(sessionId: sessionId, cwd: cwd, prompt: prompt))
+                    case .preBashTool(let sessionId, let cwd, let toolName, let toolUseId, let command):
+                        await SessionStore.shared.process(.codexBashStarted(sessionId: sessionId, cwd: cwd, toolName: toolName, toolUseId: toolUseId, command: command))
+                    case .postBashTool(let sessionId, let cwd, let toolName, let toolUseId, let command):
+                        await SessionStore.shared.process(.codexBashFinished(sessionId: sessionId, cwd: cwd, toolName: toolName, toolUseId: toolUseId, command: command))
+                    case .stop(let sessionId, let cwd):
+                        await SessionStore.shared.process(.codexStopped(sessionId: sessionId, cwd: cwd))
+                    }
+                }
             }
         )
     }

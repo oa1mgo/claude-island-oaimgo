@@ -16,6 +16,21 @@ enum SessionEvent: Sendable {
     /// A hook event was received from Claude Code
     case hookReceived(HookEvent)
 
+    /// A Codex hook-backed session was created or resumed
+    case codexSessionStarted(sessionId: String, cwd: String)
+
+    /// Codex submitted a user prompt for the current turn
+    case codexPromptSubmitted(sessionId: String, cwd: String, prompt: String?)
+
+    /// Codex began running a Bash tool
+    case codexBashStarted(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?)
+
+    /// Codex finished running a Bash tool
+    case codexBashFinished(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?)
+
+    /// Codex stopped the current turn
+    case codexStopped(sessionId: String, cwd: String)
+
     // MARK: - Permission Events (user actions)
 
     /// User approved a permission request
@@ -185,6 +200,16 @@ extension SessionEvent: CustomStringConvertible {
         switch self {
         case .hookReceived(let event):
             return "hookReceived(\(event.event), session: \(event.sessionId.prefix(8)))"
+        case .codexSessionStarted(let sessionId, _):
+            return "codexSessionStarted(session: \(sessionId.prefix(8)))"
+        case .codexPromptSubmitted(let sessionId, _, _):
+            return "codexPromptSubmitted(session: \(sessionId.prefix(8)))"
+        case .codexBashStarted(let sessionId, _, let toolName, _, _):
+            return "codexBashStarted(session: \(sessionId.prefix(8)), tool: \(toolName))"
+        case .codexBashFinished(let sessionId, _, let toolName, _, _):
+            return "codexBashFinished(session: \(sessionId.prefix(8)), tool: \(toolName))"
+        case .codexStopped(let sessionId, _):
+            return "codexStopped(session: \(sessionId.prefix(8)))"
         case .permissionApproved(let sessionId, let toolUseId):
             return "permissionApproved(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
         case .permissionDenied(let sessionId, let toolUseId, _):

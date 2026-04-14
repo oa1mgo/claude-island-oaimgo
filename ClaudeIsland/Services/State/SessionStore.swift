@@ -36,6 +36,10 @@ actor SessionStore {
     /// Status check interval (3 seconds)
     private let statusCheckIntervalSeconds: UInt64 = 3
 
+    /// Idle Codex sessions do not emit a terminal "ended" event, so reap them
+    /// after a short quiet window to avoid stale sessions lingering forever.
+    private let codexIdleExpirationSeconds: TimeInterval = 600
+
     // MARK: - Published State (for UI)
 
     /// Publisher for session state changes (nonisolated for Combine subscription from any context)
@@ -59,6 +63,21 @@ actor SessionStore {
         switch event {
         case .hookReceived(let hookEvent):
             await processHookEvent(hookEvent)
+
+        case .codexSessionStarted(let sessionId, let cwd):
+            processCodexSessionStart(sessionId: sessionId, cwd: cwd)
+
+        case .codexPromptSubmitted(let sessionId, let cwd, let prompt):
+            processCodexPromptSubmitted(sessionId: sessionId, cwd: cwd, prompt: prompt)
+
+        case .codexBashStarted(let sessionId, let cwd, let toolName, let toolUseId, let command):
+            processCodexBashStarted(sessionId: sessionId, cwd: cwd, toolName: toolName, toolUseId: toolUseId, command: command)
+
+        case .codexBashFinished(let sessionId, let cwd, let toolName, let toolUseId, let command):
+            processCodexBashFinished(sessionId: sessionId, cwd: cwd, toolName: toolName, toolUseId: toolUseId, command: command)
+
+        case .codexStopped(let sessionId, let cwd):
+            processCodexStop(sessionId: sessionId, cwd: cwd)
 
         case .permissionApproved(let sessionId, let toolUseId):
             await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
@@ -178,6 +197,7 @@ actor SessionStore {
     private func createSession(from event: HookEvent) -> SessionState {
         SessionState(
             sessionId: event.sessionId,
+            provider: .claude,
             cwd: event.cwd,
             projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
             pid: event.pid,
@@ -185,6 +205,219 @@ actor SessionStore {
             isInTmux: false,  // Will be updated
             phase: .idle
         )
+    }
+
+    private func createCodexSession(sessionId: String, cwd: String) -> SessionState {
+        SessionState(
+            sessionId: sessionId,
+            provider: .codex,
+            cwd: cwd,
+            projectName: URL(fileURLWithPath: cwd).lastPathComponent,
+            phase: .idle
+        )
+    }
+
+    private func processCodexSessionStart(sessionId: String, cwd: String) {
+        let isNewSession = sessions[sessionId] == nil
+        var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        enrichCodexRuntimeMetadata(session: &session)
+        session.lastActivity = Date()
+        if isNewSession || !session.phase.isActive {
+            session.phase = .idle
+        }
+        sessions[sessionId] = session
+
+        if isNewSession {
+            Mixpanel.mainInstance().track(event: "Session Started", properties: ["provider": "codex"])
+        }
+    }
+
+    private func processCodexPromptSubmitted(sessionId: String, cwd: String, prompt: String?) {
+        var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        let now = Date()
+        let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstUserMessage = session.conversationInfo.firstUserMessage ?? trimmedPrompt
+
+        enrichCodexRuntimeMetadata(session: &session)
+        session.lastActivity = now
+        session.phase = .processing
+        if let trimmedPrompt, !trimmedPrompt.isEmpty {
+            session.chatItems.append(
+                ChatHistoryItem(
+                    id: "codex-user-\(sessionId)-\(Int(now.timeIntervalSince1970 * 1000))",
+                    type: .user(trimmedPrompt),
+                    timestamp: now
+                )
+            )
+        }
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: trimmedPrompt,
+            lastMessageRole: trimmedPrompt == nil ? session.conversationInfo.lastMessageRole : "user",
+            lastToolName: nil,
+            firstUserMessage: firstUserMessage,
+            lastUserMessageDate: trimmedPrompt == nil ? session.conversationInfo.lastUserMessageDate : now,
+            usage: session.conversationInfo.usage
+        )
+
+        sessions[sessionId] = session
+    }
+
+    private func processCodexBashStarted(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?) {
+        var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        let now = Date()
+        let toolId = toolUseId ?? makeCodexToolId(for: sessionId)
+
+        enrichCodexRuntimeMetadata(session: &session)
+        session.lastActivity = now
+        session.phase = .processing
+        session.toolTracker.startTool(id: toolId, name: toolName)
+
+        let inputPreview = command?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let input = inputPreview.map { ["command": $0] } ?? [:]
+        session.chatItems.append(
+            ChatHistoryItem(
+                id: toolId,
+                type: .toolCall(ToolCallItem(
+                    name: toolName,
+                    input: input,
+                    status: .running,
+                    result: nil,
+                    structuredResult: nil,
+                    subagentTools: []
+                )),
+                timestamp: now
+            )
+        )
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: inputPreview,
+            lastMessageRole: "tool",
+            lastToolName: toolName,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate,
+            usage: session.conversationInfo.usage
+        )
+
+        sessions[sessionId] = session
+    }
+
+    private func processCodexBashFinished(sessionId: String, cwd: String, toolName: String, toolUseId: String?, command: String?) {
+        var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        let now = Date()
+
+        enrichCodexRuntimeMetadata(session: &session)
+        session.lastActivity = now
+
+        if let toolId = latestRunningCodexToolId(in: session, toolName: toolName, toolUseId: toolUseId) {
+            session.toolTracker.completeTool(id: toolId, success: true)
+            updateToolStatus(in: &session, toolId: toolId, status: .success)
+        }
+
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? session.conversationInfo.lastMessage,
+            lastMessageRole: "tool",
+            lastToolName: toolName,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate,
+            usage: session.conversationInfo.usage
+        )
+        session.phase = hasRunningTools(in: session) ? .processing : .idle
+
+        sessions[sessionId] = session
+    }
+
+    private func processCodexStop(sessionId: String, cwd: String) {
+        var session = sessions[sessionId] ?? createCodexSession(sessionId: sessionId, cwd: cwd)
+        enrichCodexRuntimeMetadata(session: &session)
+        session.lastActivity = Date()
+        session.phase = .idle
+
+        for index in session.chatItems.indices {
+            if case .toolCall(var tool) = session.chatItems[index].type, tool.status == .running {
+                tool.status = .interrupted
+                session.chatItems[index] = ChatHistoryItem(
+                    id: session.chatItems[index].id,
+                    type: .toolCall(tool),
+                    timestamp: session.chatItems[index].timestamp
+                )
+            }
+        }
+
+        session.toolTracker.inProgress.removeAll()
+        sessions[sessionId] = session
+    }
+
+    private func makeCodexToolId(for sessionId: String) -> String {
+        let millis = Int(Date().timeIntervalSince1970 * 1000)
+        return "codex-bash-\(sessionId)-\(millis)"
+    }
+
+    private func latestRunningCodexToolId(in session: SessionState, toolName: String, toolUseId: String?) -> String? {
+        if let toolUseId,
+           session.chatItems.contains(where: { $0.id == toolUseId }) {
+            return toolUseId
+        }
+
+        for item in session.chatItems.reversed() {
+            guard case .toolCall(let tool) = item.type else { continue }
+            guard tool.name == toolName, tool.status == .running else { continue }
+            return item.id
+        }
+        return nil
+    }
+
+    private func hasRunningTools(in session: SessionState) -> Bool {
+        session.chatItems.contains { item in
+            if case .toolCall(let tool) = item.type {
+                return tool.status == .running || tool.status == .waitingForApproval
+            }
+            return false
+        }
+    }
+
+    private func enrichCodexRuntimeMetadata(session: inout SessionState) {
+        let tree = ProcessTreeBuilder.shared.buildTree()
+        guard let process = bestMatchingCodexProcess(for: session.cwd, tree: tree) else {
+            return
+        }
+
+        session.pid = process.pid
+        session.tty = process.tty
+        session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: process.pid, tree: tree)
+    }
+
+    private func bestMatchingCodexProcess(for cwd: String, tree: [Int: ProcessInfo]) -> ProcessInfo? {
+        let normalizedCwd = URL(fileURLWithPath: cwd).standardizedFileURL.path
+
+        let candidates = tree.values.filter { info in
+            let command = info.command.lowercased()
+            return command == "codex" || command.hasSuffix("/codex") || command.contains("/codex/")
+        }
+
+        let exactMatches = candidates.compactMap { info -> ProcessInfo? in
+            guard let processCwd = ProcessTreeBuilder.shared.getWorkingDirectory(forPid: info.pid) else {
+                return nil
+            }
+
+            let normalizedProcessCwd = URL(fileURLWithPath: processCwd).standardizedFileURL.path
+            return normalizedProcessCwd == normalizedCwd ? info : nil
+        }
+
+        if let tmuxMatch = exactMatches
+            .filter({ ProcessTreeBuilder.shared.isInTmux(pid: $0.pid, tree: tree) })
+            .max(by: { $0.pid < $1.pid }) {
+            return tmuxMatch
+        }
+
+        if let exactMatch = exactMatches.max(by: { $0.pid < $1.pid }) {
+            return exactMatch
+        }
+
+        return candidates
+            .filter { ProcessTreeBuilder.shared.isInTmux(pid: $0.pid, tree: tree) }
+            .max(by: { $0.pid < $1.pid })
     }
 
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
@@ -1080,6 +1313,14 @@ actor SessionStore {
                 continue
             }
 
+            if session.provider == .codex,
+               session.phase == .idle,
+               Date().timeIntervalSince(session.lastActivity) > codexIdleExpirationSeconds {
+                sessions.removeValue(forKey: sessionId)
+                removedSession = true
+                continue
+            }
+
             if let pid = session.pid {
                 let isRunning = isProcessRunning(pid: pid)
                 if !isRunning {
@@ -1092,8 +1333,8 @@ actor SessionStore {
             }
 
             let needsSync: Bool
-            switch session.phase {
-            case .processing, .waitingForApproval:
+            switch (session.provider, session.phase) {
+            case (.claude, .processing), (.claude, .waitingForApproval):
                 needsSync = true
             default:
                 needsSync = false
