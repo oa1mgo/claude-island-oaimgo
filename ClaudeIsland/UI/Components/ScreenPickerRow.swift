@@ -9,6 +9,8 @@ import SwiftUI
 
 struct ScreenPickerRow: View {
     @ObservedObject var screenSelector: ScreenSelector
+    var primaryTextColor: Color = .white
+    var secondaryTextColor: Color = .white.opacity(0.4)
     @State private var isHovered = false
 
     private var isExpanded: Bool {
@@ -41,12 +43,12 @@ struct ScreenPickerRow: View {
 
                     Text(currentSelectionLabel)
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                         .lineLimit(1)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -65,7 +67,9 @@ struct ScreenPickerRow: View {
                     ScreenOptionRow(
                         label: "Automatic",
                         sublabel: "Built-in or Main",
-                        isSelected: screenSelector.selectionMode == .automatic
+                        isSelected: screenSelector.selectionMode == .automatic,
+                        primaryTextColor: primaryTextColor,
+                        secondaryTextColor: secondaryTextColor
                     ) {
                         screenSelector.selectAutomatic()
                         triggerWindowRecreation()
@@ -78,7 +82,9 @@ struct ScreenPickerRow: View {
                             label: screen.localizedName,
                             sublabel: screenSublabel(for: screen),
                             isSelected: screenSelector.selectionMode == .specificScreen &&
-                                       screenSelector.isSelected(screen)
+                                       screenSelector.isSelected(screen),
+                            primaryTextColor: primaryTextColor,
+                            secondaryTextColor: secondaryTextColor
                         ) {
                             screenSelector.selectScreen(screen)
                             triggerWindowRecreation()
@@ -105,7 +111,7 @@ struct ScreenPickerRow: View {
     }
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 
     private func screenSublabel(for screen: NSScreen) -> String? {
@@ -142,6 +148,8 @@ private struct ScreenOptionRow: View {
     let label: String
     let sublabel: String?
     let isSelected: Bool
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
     let action: () -> Void
 
     @State private var isHovered = false
@@ -156,12 +164,12 @@ private struct ScreenOptionRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(isHovered ? 1.0 : 0.7))
+                        .foregroundColor(primaryTextColor.opacity(isHovered ? 1.0 : 0.82))
 
                     if let sublabel = sublabel {
                         Text(sublabel)
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(secondaryTextColor)
                     }
                 }
 

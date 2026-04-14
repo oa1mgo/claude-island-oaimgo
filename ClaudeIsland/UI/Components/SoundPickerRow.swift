@@ -10,6 +10,8 @@ import SwiftUI
 
 struct SoundPickerRow: View {
     @ObservedObject var soundSelector: SoundSelector
+    var primaryTextColor: Color = .white
+    var secondaryTextColor: Color = .white.opacity(0.4)
     @State private var isHovered = false
     @State private var selectedSound: NotificationSound = AppSettings.notificationSound
 
@@ -43,12 +45,12 @@ struct SoundPickerRow: View {
 
                     Text(selectedSound.rawValue)
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                         .lineLimit(1)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -67,7 +69,8 @@ struct SoundPickerRow: View {
                         ForEach(NotificationSound.allCases, id: \.self) { sound in
                             SoundOptionRowInline(
                                 sound: sound,
-                                isSelected: selectedSound == sound
+                                isSelected: selectedSound == sound,
+                                primaryTextColor: primaryTextColor
                             ) {
                                 // Play preview sound
                                 if let soundName = sound.soundName {
@@ -90,7 +93,7 @@ struct SoundPickerRow: View {
     }
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 }
 
@@ -99,6 +102,7 @@ struct SoundPickerRow: View {
 private struct SoundOptionRowInline: View {
     let sound: NotificationSound
     let isSelected: Bool
+    let primaryTextColor: Color
     let action: () -> Void
 
     @State private var isHovered = false
@@ -112,7 +116,7 @@ private struct SoundOptionRowInline: View {
 
                 Text(sound.rawValue)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(isHovered ? 1.0 : 0.7))
+                    .foregroundColor(primaryTextColor.opacity(isHovered ? 1.0 : 0.82))
 
                 Spacer()
 

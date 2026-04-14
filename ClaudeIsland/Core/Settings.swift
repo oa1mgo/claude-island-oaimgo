@@ -39,6 +39,7 @@ enum AppSettings {
     private enum Keys {
         static let notificationSound = "notificationSound"
         static let claudeDirectoryName = "claudeDirectoryName"
+        static let artworkAdaptiveBackgroundEnabled = "artworkAdaptiveBackgroundEnabled"
     }
 
     // MARK: - Notification Sound
@@ -69,6 +70,22 @@ enum AppSettings {
         }
         set {
             defaults.set(newValue.trimmingCharacters(in: .whitespaces), forKey: Keys.claudeDirectoryName)
+        }
+    }
+
+    // MARK: - Artwork Adaptive Background
+
+    /// Controls whether the notch artwork background adapts to the current artwork.
+    /// Defaults to enabled.
+    static var artworkAdaptiveBackgroundEnabled: Bool {
+        get {
+            if defaults.object(forKey: Keys.artworkAdaptiveBackgroundEnabled) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Keys.artworkAdaptiveBackgroundEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.artworkAdaptiveBackgroundEnabled)
         }
     }
 }

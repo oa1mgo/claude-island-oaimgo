@@ -16,6 +16,15 @@ private let cornerRadiusInsets = (
 )
 
 struct NotchView: View {
+    private struct ExpandedNotchTheme {
+        let backgroundGradient: LinearGradient
+        let overlayColor: Color
+        let primaryText: Color
+        let secondaryText: Color
+        let separator: Color
+        let headerIcon: Color
+    }
+
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
@@ -27,6 +36,7 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+    @State private var artworkAdaptiveBackgroundEnabled = AppSettings.artworkAdaptiveBackgroundEnabled
 
     @Namespace private var activityNamespace
 
@@ -167,11 +177,31 @@ struct NotchView: View {
                             : cornerRadiusInsets.closed.bottom
                     )
                     .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
-                    .background(.black)
+                    .background {
+                        if isAdaptiveBackgroundEnabled {
+                            ZStack {
+                                expandedNotchTheme.backgroundGradient
+
+                                RadialGradient(
+                                    colors: [
+                                        expandedNotchTheme.primaryText.opacity(0.08),
+                                        .clear
+                                    ],
+                                    center: .topLeading,
+                                    startRadius: 12,
+                                    endRadius: notchSize.width * 0.9
+                                )
+
+                                expandedNotchTheme.overlayColor
+                            }
+                        } else {
+                            Color.black
+                        }
+                    }
                     .clipShape(currentNotchShape)
                     .overlay(alignment: .top) {
                         Rectangle()
-                            .fill(.black)
+                            .fill(viewModel.status == .opened && isAdaptiveBackgroundEnabled ? expandedNotchTheme.overlayColor : .black)
                             .frame(height: 1)
                             .padding(.horizontal, topCornerRadius)
                     }
@@ -190,6 +220,7 @@ struct NotchView: View {
                     .animation(.smooth, value: hasPendingPermission)
                     .animation(.smooth, value: hasWaitingForInput)
                     .animation(.smooth, value: showMusicActivity)
+                    .animation(.smooth(duration: 0.45), value: musicManager.playbackState.artworkData)
                     .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
                     .contentShape(Rectangle())
                     .onHover { hovering in
@@ -228,6 +259,9 @@ struct NotchView: View {
         .onChange(of: musicManager.playbackState) { _, _ in
             handleProcessingChange()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            artworkAdaptiveBackgroundEnabled = AppSettings.artworkAdaptiveBackgroundEnabled
+        }
     }
 
     // MARK: - Notch Layout
@@ -256,6 +290,48 @@ struct NotchView: View {
 
     private var showCompactMusicActivity: Bool {
         viewModel.status != .opened && showMusicActivity
+    }
+
+    private var hasArtworkThemeSource: Bool {
+        musicManager.albumArt != nil && musicManager.hasArtworkGradient
+    }
+
+    private var isAdaptiveBackgroundEnabled: Bool {
+        viewModel.status == .opened && musicManager.isVisible && artworkAdaptiveBackgroundEnabled && hasArtworkThemeSource
+    }
+
+    private var expandedNotchTheme: ExpandedNotchTheme {
+        let colors = musicManager.artworkGradient.map(Color.init(nsColor:))
+        let useDarkForeground = perceivedBrightness(for: musicManager.artworkGradient) > 0.72
+
+        return ExpandedNotchTheme(
+            backgroundGradient: LinearGradient(
+                colors: colors + [colors.last ?? .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            overlayColor: useDarkForeground ? Color.black.opacity(0.18) : Color.black.opacity(0.36),
+            primaryText: useDarkForeground ? Color.black.opacity(0.82) : Color.white.opacity(0.96),
+            secondaryText: useDarkForeground ? Color.black.opacity(0.58) : Color.white.opacity(0.62),
+            separator: useDarkForeground ? Color.black.opacity(0.12) : Color.white.opacity(0.10),
+            headerIcon: useDarkForeground ? Color.black.opacity(0.56) : Color.white.opacity(0.5)
+        )
+    }
+
+    private var expandedPrimaryTextColor: Color {
+        isAdaptiveBackgroundEnabled ? expandedNotchTheme.primaryText : .white
+    }
+
+    private var expandedSecondaryTextColor: Color {
+        isAdaptiveBackgroundEnabled ? expandedNotchTheme.secondaryText : .white.opacity(0.4)
+    }
+
+    private var expandedSeparatorColor: Color {
+        isAdaptiveBackgroundEnabled ? expandedNotchTheme.separator : .white.opacity(0.08)
+    }
+
+    private var expandedHeaderIconColor: Color {
+        isAdaptiveBackgroundEnabled ? expandedNotchTheme.headerIcon : .white.opacity(0.4)
     }
 
     /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
@@ -390,7 +466,7 @@ struct NotchView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: viewModel.contentType == .menu ? "xmark" : "line.3.horizontal")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(expandedHeaderIconColor)
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
 
@@ -420,18 +496,36 @@ struct NotchView: View {
                     musicManager: musicManager
                 )
             case .menu:
-                NotchMenuView(viewModel: viewModel)
+                NotchMenuView(
+                    viewModel: viewModel,
+                    primaryTextColor: expandedPrimaryTextColor,
+                    secondaryTextColor: expandedSecondaryTextColor,
+                    separatorColor: expandedSeparatorColor
+                )
             case .chat(let session):
                 ChatView(
                     sessionId: session.sessionId,
                     initialSession: session,
                     sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
+                    viewModel: viewModel,
+                    primaryTextColor: expandedPrimaryTextColor,
+                    secondaryTextColor: expandedSecondaryTextColor
                 )
             }
         }
         .frame(width: notchSize.width - 24) // Fixed width to prevent text reflow
         // Removed .id() - was causing view recreation and performance issues
+    }
+
+    private func perceivedBrightness(for colors: [NSColor]) -> CGFloat {
+        let samples = colors.compactMap { $0.usingColorSpace(.deviceRGB) }
+        guard !samples.isEmpty else { return 0 }
+
+        let total = samples.reduce(CGFloat.zero) { partialResult, color in
+            partialResult + ((color.redComponent * 0.299) + (color.greenComponent * 0.587) + (color.blueComponent * 0.114))
+        }
+
+        return total / CGFloat(samples.count)
     }
 
     // MARK: - Event Handlers

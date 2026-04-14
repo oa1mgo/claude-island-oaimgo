@@ -12,6 +12,8 @@ import AppKit
 import SwiftUI
 
 struct ClaudeDirPickerRow: View {
+    var primaryTextColor: Color = .white
+    var secondaryTextColor: Color = .white.opacity(0.4)
     @ObservedObject private var selector = ClaudeDirSelector.shared
     @State private var currentValue: String = AppSettings.claudeDirectoryName
     @State private var isHovered: Bool = false
@@ -40,13 +42,13 @@ struct ClaudeDirPickerRow: View {
 
                     Text(displayValue)
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                         .lineLimit(1)
                         .truncationMode(.middle)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(secondaryTextColor)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -64,7 +66,9 @@ struct ClaudeDirPickerRow: View {
                     ClaudeDirOptionRow(
                         label: "Auto-detect",
                         sublabel: isCustom ? nil : resolvedAutoDetectPath,
-                        isSelected: !isCustom
+                        isSelected: !isCustom,
+                        primaryTextColor: primaryTextColor,
+                        secondaryTextColor: secondaryTextColor
                     ) {
                         applyChoice(path: "")
                     }
@@ -72,7 +76,9 @@ struct ClaudeDirPickerRow: View {
                     ClaudeDirOptionRow(
                         label: "Choose folder…",
                         sublabel: isCustom ? displayValue : nil,
-                        isSelected: isCustom
+                        isSelected: isCustom,
+                        primaryTextColor: primaryTextColor,
+                        secondaryTextColor: secondaryTextColor
                     ) {
                         openFolderPicker()
                     }
@@ -87,7 +93,7 @@ struct ClaudeDirPickerRow: View {
     // MARK: - Presentation
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 
     private var isCustom: Bool {
@@ -160,6 +166,8 @@ private struct ClaudeDirOptionRow: View {
     let label: String
     let sublabel: String?
     let isSelected: Bool
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
     let action: () -> Void
 
     @State private var isHovered = false
@@ -173,12 +181,12 @@ private struct ClaudeDirOptionRow: View {
 
                 Text(label)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(isHovered ? 1.0 : 0.7))
+                    .foregroundColor(primaryTextColor.opacity(isHovered ? 1.0 : 0.82))
 
                 if let sublabel {
                     Text(sublabel)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.35))
+                        .foregroundColor(secondaryTextColor)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }

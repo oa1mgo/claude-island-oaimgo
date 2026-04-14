@@ -13,6 +13,8 @@ struct ChatView: View {
     let initialSession: SessionState
     let sessionMonitor: ClaudeSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     @State private var inputText: String = ""
     @State private var history: [ChatHistoryItem] = []
@@ -28,11 +30,20 @@ struct ChatView: View {
     @State private var isRefreshingCodexHistory: Bool = false
     @FocusState private var isInputFocused: Bool
 
-    init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
+    init(
+        sessionId: String,
+        initialSession: SessionState,
+        sessionMonitor: ClaudeSessionMonitor,
+        viewModel: NotchViewModel,
+        primaryTextColor: Color = .white,
+        secondaryTextColor: Color = .white.opacity(0.4)
+    ) {
         self.sessionId = sessionId
         self.initialSession = initialSession
         self.sessionMonitor = sessionMonitor
         self._viewModel = ObservedObject(wrappedValue: viewModel)
+        self.primaryTextColor = primaryTextColor
+        self.secondaryTextColor = secondaryTextColor
         self._session = State(initialValue: initialSession)
 
         // Codex sessions currently source their visible history from SessionStore
@@ -222,12 +233,12 @@ struct ChatView: View {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.6))
+                    .foregroundColor(primaryTextColor.opacity(isHeaderHovered ? 1.0 : 0.72))
                     .frame(width: 24, height: 24)
 
                 Text(session.displayTitle)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.85))
+                    .foregroundColor(primaryTextColor.opacity(isHeaderHovered ? 1.0 : 0.9))
                     .lineLimit(1)
 
                 Spacer()
@@ -243,17 +254,6 @@ struct ChatView: View {
         .onHover { isHeaderHovered = $0 }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.black.opacity(0.2))
-        .overlay(alignment: .bottom) {
-            LinearGradient(
-                colors: [fadeColor.opacity(0.7), fadeColor.opacity(0)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 24)
-            .offset(y: 24) // Push below header
-            .allowsHitTesting(false)
-        }
         .zIndex(1) // Render above message list
     }
 
@@ -365,11 +365,11 @@ struct ChatView: View {
     private var loadingState: some View {
         VStack(spacing: 8) {
             ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.4)))
+                .progressViewStyle(CircularProgressViewStyle(tint: secondaryTextColor))
                 .scaleEffect(0.8)
             Text("Loading messages...")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(secondaryTextColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -380,18 +380,15 @@ struct ChatView: View {
         VStack(spacing: 8) {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 24))
-                .foregroundColor(.white.opacity(0.2))
+                .foregroundColor(secondaryTextColor.opacity(0.6))
             Text("No messages yet")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(secondaryTextColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Message List
-
-    /// Background color for fade gradients
-    private let fadeColor = Color(red: 0.00, green: 0.00, blue: 0.00)
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -414,7 +411,12 @@ struct ChatView: View {
                     }
 
                     ForEach(history.reversed()) { item in
-                        MessageItemView(item: item, sessionId: sessionId)
+                        MessageItemView(
+                            item: item,
+                            sessionId: sessionId,
+                            primaryTextColor: primaryTextColor,
+                            secondaryTextColor: secondaryTextColor
+                        )
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -485,7 +487,7 @@ struct ChatView: View {
             TextField(chatInputPlaceholder, text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
+                .foregroundColor(canSendMessages ? primaryTextColor : secondaryTextColor)
                 .focused($isInputFocused)
                 .disabled(!canSendMessages)
                 .padding(.horizontal, 14)
@@ -507,24 +509,13 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 28))
-                    .foregroundColor(!canSendMessages || inputText.isEmpty ? .white.opacity(0.2) : .white.opacity(0.9))
+                    .foregroundColor(!canSendMessages || inputText.isEmpty ? secondaryTextColor.opacity(0.55) : primaryTextColor.opacity(0.94))
             }
             .buttonStyle(.plain)
             .disabled(!canSendMessages || inputText.isEmpty)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.2))
-        .overlay(alignment: .top) {
-            LinearGradient(
-                colors: [fadeColor.opacity(0), fadeColor.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 24)
-            .offset(y: -24) // Push above input bar
-            .allowsHitTesting(false)
-        }
         .zIndex(1) // Render above message list
     }
 
@@ -534,6 +525,8 @@ struct ChatView: View {
         ChatApprovalBar(
             tool: tool,
             toolInput: session.pendingToolInput,
+            primaryTextColor: primaryTextColor,
+            secondaryTextColor: secondaryTextColor,
             onApprove: { approvePermission() },
             onDeny: { denyPermission() }
         )
@@ -546,6 +539,8 @@ struct ChatView: View {
         ChatInteractivePromptBar(
             provider: session.provider,
             isInTmux: session.isInTmux,
+            primaryTextColor: primaryTextColor,
+            secondaryTextColor: secondaryTextColor,
             onGoToTerminal: { focusTerminal() }
         )
     }
@@ -646,19 +641,21 @@ struct ChatView: View {
 struct MessageItemView: View {
     let item: ChatHistoryItem
     let sessionId: String
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     var body: some View {
         switch item.type {
         case .user(let text):
-            UserMessageView(text: text)
+            UserMessageView(text: text, primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
         case .assistant(let text):
-            AssistantMessageView(text: text)
+            AssistantMessageView(text: text, primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
         case .toolCall(let tool):
-            ToolCallView(tool: tool, sessionId: sessionId)
+            ToolCallView(tool: tool, sessionId: sessionId, primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
         case .thinking(let text):
-            ThinkingView(text: text)
+            ThinkingView(text: text, secondaryTextColor: secondaryTextColor)
         case .image(let block):
-            ImageMessageView(image: block)
+            ImageMessageView(image: block, secondaryTextColor: secondaryTextColor)
         case .interrupted:
             InterruptedMessageView()
         }
@@ -669,6 +666,7 @@ struct MessageItemView: View {
 
 struct ImageMessageView: View {
     let image: ImageBlock
+    let secondaryTextColor: Color
 
     /// Decoded image cached so base64 isn't re-decoded on every render.
     /// Large inline images (tens of KB) would otherwise thrash during
@@ -697,12 +695,12 @@ struct ImageMessageView: View {
                     Text("Image (\(image.mediaType))")
                         .font(.system(size: 12))
                 }
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(secondaryTextColor.opacity(0.12))
                 )
             }
         }
@@ -722,17 +720,19 @@ struct ImageMessageView: View {
 
 struct UserMessageView: View {
     let text: String
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     var body: some View {
         HStack {
             Spacer(minLength: 60)
 
-            MarkdownText(text, color: .white, fontSize: 13)
+            MarkdownText(text, color: primaryTextColor, fontSize: 13)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 18)
-                        .fill(Color.white.opacity(0.15))
+                        .fill(secondaryTextColor.opacity(0.22))
                 )
         }
     }
@@ -742,6 +742,8 @@ struct UserMessageView: View {
 
 struct AssistantMessageView: View {
     let text: String
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     var body: some View {
         // Skip rendering when text is empty — otherwise the dot indicator
@@ -750,13 +752,12 @@ struct AssistantMessageView: View {
             EmptyView()
         } else {
             HStack(alignment: .top, spacing: 6) {
-                // White dot indicator
                 Circle()
-                    .fill(Color.white.opacity(0.6))
+                    .fill(secondaryTextColor.opacity(0.9))
                     .frame(width: 6, height: 6)
                     .padding(.top, 5)
 
-                MarkdownText(text, color: .white.opacity(0.9), fontSize: 13)
+                MarkdownText(text, color: primaryTextColor.opacity(0.94), fontSize: 13)
 
                 Spacer(minLength: 60)
             }
@@ -817,6 +818,8 @@ struct ProcessingIndicatorView: View {
 struct ToolCallView: View {
     let tool: ToolCallItem
     let sessionId: String
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     @State private var pulseOpacity: Double = 0.6
     @State private var isExpanded: Bool = false
@@ -825,7 +828,7 @@ struct ToolCallView: View {
     private var statusColor: Color {
         switch tool.status {
         case .running:
-            return Color.white
+            return primaryTextColor
         case .waitingForApproval:
             return Color.orange
         case .success:
@@ -838,11 +841,11 @@ struct ToolCallView: View {
     private var textColor: Color {
         switch tool.status {
         case .running:
-            return .white.opacity(0.6)
+            return secondaryTextColor
         case .waitingForApproval:
             return Color.orange.opacity(0.9)
         case .success:
-            return .white.opacity(0.7)
+            return primaryTextColor.opacity(0.78)
         case .error, .interrupted:
             return Color.red.opacity(0.8)
         }
@@ -923,7 +926,7 @@ struct ToolCallView: View {
                 if canExpand && tool.status != .running && tool.status != .waitingForApproval {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.white.opacity(0.3))
+                        .foregroundColor(secondaryTextColor.opacity(0.8))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isExpanded)
                 }
@@ -931,7 +934,7 @@ struct ToolCallView: View {
 
             // Subagent tools list (for Task/Agent tools)
             if tool.isSubagentContainer && !tool.subagentTools.isEmpty {
-                SubagentToolsList(tools: tool.subagentTools)
+                SubagentToolsList(tools: tool.subagentTools, primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
                     .padding(.leading, 12)
                     .padding(.top, 2)
             }
@@ -955,7 +958,7 @@ struct ToolCallView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(canExpand && isHovering ? Color.white.opacity(0.05) : Color.clear)
+                .fill(canExpand && isHovering ? secondaryTextColor.opacity(0.12) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -987,6 +990,8 @@ struct ToolCallView: View {
 /// List of subagent tools (shown during Task execution)
 struct SubagentToolsList: View {
     let tools: [SubagentToolCall]
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     /// Number of hidden tools (all except last 2)
     private var hiddenCount: Int {
@@ -1004,12 +1009,12 @@ struct SubagentToolsList: View {
             if hiddenCount > 0 {
                 Text("+\(hiddenCount) more tool uses")
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(secondaryTextColor)
             }
 
             // Show last 2 tools (most recent activity)
             ForEach(recentTools) { tool in
-                SubagentToolRow(tool: tool)
+                SubagentToolRow(tool: tool, primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
             }
         }
     }
@@ -1018,6 +1023,8 @@ struct SubagentToolsList: View {
 /// Single subagent tool row
 struct SubagentToolRow: View {
     let tool: SubagentToolCall
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     @State private var dotOpacity: Double = 0.5
 
@@ -1060,12 +1067,12 @@ struct SubagentToolRow: View {
             // Tool name
             Text(tool.name)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(primaryTextColor.opacity(0.7))
 
             // Status text (same format as regular tools)
             Text(statusText)
                 .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(secondaryTextColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -1075,6 +1082,8 @@ struct SubagentToolRow: View {
 /// Summary of subagent tools (shown when Task is expanded after completion)
 struct SubagentToolsSummary: View {
     let tools: [SubagentToolCall]
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     private var toolCounts: [(String, Int)] {
         var counts: [String: Int] = [:]
@@ -1088,17 +1097,17 @@ struct SubagentToolsSummary: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Subagent used \(tools.count) tools:")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(secondaryTextColor)
 
             HStack(spacing: 8) {
                 ForEach(toolCounts.prefix(5), id: \.0) { name, count in
                     HStack(spacing: 2) {
                         Text(name)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(primaryTextColor.opacity(0.68))
                         Text("×\(count)")
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.3))
+                            .foregroundColor(secondaryTextColor.opacity(0.85))
                     }
                 }
             }
@@ -1107,7 +1116,7 @@ struct SubagentToolsSummary: View {
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(0.03))
+                .fill(secondaryTextColor.opacity(0.08))
         )
     }
 }
@@ -1116,6 +1125,7 @@ struct SubagentToolsSummary: View {
 
 struct ThinkingView: View {
     let text: String
+    let secondaryTextColor: Color
 
     @State private var isExpanded = false
 
@@ -1137,7 +1147,7 @@ struct ThinkingView: View {
 
                 Text(isExpanded ? text : String(text.prefix(80)) + (canExpand ? "..." : ""))
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(secondaryTextColor)
                     .italic()
                     .lineLimit(isExpanded ? nil : 1)
                     .multilineTextAlignment(.leading)
@@ -1147,7 +1157,7 @@ struct ThinkingView: View {
                 if canExpand {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.5))
+                        .foregroundColor(secondaryTextColor.opacity(0.8))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .padding(.top, 3)
                 }
@@ -1185,6 +1195,8 @@ struct InterruptedMessageView: View {
 struct ChatInteractivePromptBar: View {
     let provider: SessionProvider
     let isInTmux: Bool
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
     let onGoToTerminal: () -> Void
 
     @State private var showContent = false
@@ -1199,7 +1211,7 @@ struct ChatInteractivePromptBar: View {
                     .foregroundColor(TerminalColors.amber)
                 Text(provider == .codex ? "Codex needs your input" : "Claude Code needs your input")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(secondaryTextColor)
                     .lineLimit(1)
             }
             .opacity(showContent ? 1 : 0)
@@ -1219,10 +1231,10 @@ struct ChatInteractivePromptBar: View {
                     Text("Terminal")
                         .font(.system(size: 13, weight: .medium))
                 }
-                .foregroundColor(isInTmux ? .black : .white.opacity(0.4))
+                .foregroundColor(isInTmux ? Color.black.opacity(0.88) : secondaryTextColor)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(isInTmux ? Color.white.opacity(0.95) : Color.white.opacity(0.1))
+                .background(isInTmux ? primaryTextColor.opacity(0.92) : secondaryTextColor.opacity(0.16))
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -1232,7 +1244,6 @@ struct ChatInteractivePromptBar: View {
         .frame(minHeight: 44)  // Consistent height with other bars
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.2))
         .onAppear {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.05)) {
                 showContent = true
@@ -1250,6 +1261,8 @@ struct ChatInteractivePromptBar: View {
 struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
     let onApprove: () -> Void
     let onDeny: () -> Void
 
@@ -1267,7 +1280,7 @@ struct ChatApprovalBar: View {
                 if let input = toolInput {
                     Text(input)
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(secondaryTextColor)
                         .lineLimit(1)
                 }
             }
@@ -1282,10 +1295,10 @@ struct ChatApprovalBar: View {
             } label: {
                 Text("Deny")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(primaryTextColor.opacity(0.78))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.1))
+                    .background(secondaryTextColor.opacity(0.16))
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -1298,10 +1311,10 @@ struct ChatApprovalBar: View {
             } label: {
                 Text("Allow")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black)
+                    .foregroundColor(Color.black.opacity(0.88))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.95))
+                    .background(primaryTextColor.opacity(0.92))
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -1311,7 +1324,6 @@ struct ChatApprovalBar: View {
         .frame(minHeight: 44)  // Consistent height with other bars
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.2))
         .onAppear {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.05)) {
                 showContent = true

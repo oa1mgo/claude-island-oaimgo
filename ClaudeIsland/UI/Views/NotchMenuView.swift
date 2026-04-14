@@ -14,11 +14,15 @@ import ServiceManagement
 
 struct NotchMenuView: View {
     @ObservedObject var viewModel: NotchViewModel
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
+    let separatorColor: Color
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
     @ObservedObject private var soundSelector = SoundSelector.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
+    @State private var artworkAdaptiveBackgroundEnabled: Bool = true
 
     var body: some View {
         // ScrollView so the menu gracefully scrolls when content exceeds the
@@ -28,29 +32,43 @@ struct NotchMenuView: View {
                 // Back button
                 MenuRow(
                     icon: "chevron.left",
-                    label: "Back"
+                    label: "Back",
+                    primaryTextColor: primaryTextColor
                 ) {
                     viewModel.toggleMenu()
                 }
 
                 Divider()
-                    .background(Color.white.opacity(0.08))
+                    .background(separatorColor)
                     .padding(.vertical, 4)
 
                 // Appearance settings
-                ScreenPickerRow(screenSelector: screenSelector)
-                SoundPickerRow(soundSelector: soundSelector)
-                ClaudeDirPickerRow()
+                ScreenPickerRow(
+                    screenSelector: screenSelector,
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
+                )
+                SoundPickerRow(
+                    soundSelector: soundSelector,
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
+                )
+                ClaudeDirPickerRow(
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
+                )
 
                 Divider()
-                    .background(Color.white.opacity(0.08))
+                    .background(separatorColor)
                     .padding(.vertical, 4)
 
                 // System settings
                 MenuToggleRow(
                     icon: "power",
                     label: "Launch at Login",
-                    isOn: launchAtLogin
+                    isOn: launchAtLogin,
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
                 ) {
                     do {
                         if launchAtLogin {
@@ -66,9 +84,22 @@ struct NotchMenuView: View {
                 }
 
                 MenuToggleRow(
+                    icon: "photo",
+                    label: "Artwork Adaptive Background",
+                    isOn: artworkAdaptiveBackgroundEnabled,
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
+                ) {
+                    artworkAdaptiveBackgroundEnabled.toggle()
+                    AppSettings.artworkAdaptiveBackgroundEnabled = artworkAdaptiveBackgroundEnabled
+                }
+
+                MenuToggleRow(
                     icon: "arrow.triangle.2.circlepath",
                     label: "Hooks",
-                    isOn: hooksInstalled
+                    isOn: hooksInstalled,
+                    primaryTextColor: primaryTextColor,
+                    secondaryTextColor: secondaryTextColor
                 ) {
                     if hooksInstalled {
                         HookInstaller.uninstall()
@@ -79,15 +110,16 @@ struct NotchMenuView: View {
                     }
                 }
 
-                AccessibilityRow(isEnabled: AXIsProcessTrusted())
+                AccessibilityRow(isEnabled: AXIsProcessTrusted(), primaryTextColor: primaryTextColor, secondaryTextColor: secondaryTextColor)
 
                 Divider()
-                    .background(Color.white.opacity(0.08))
+                    .background(separatorColor)
                     .padding(.vertical, 4)
 
                 MenuRow(
                     icon: "star",
-                    label: "Star on GitHub"
+                    label: "Star on GitHub",
+                    primaryTextColor: primaryTextColor
                 ) {
                     if let url = URL(string: "https://github.com/oa1mgo/claude-island-oaimgo") {
                         NSWorkspace.shared.open(url)
@@ -95,13 +127,14 @@ struct NotchMenuView: View {
                 }
 
                 Divider()
-                    .background(Color.white.opacity(0.08))
+                    .background(separatorColor)
                     .padding(.vertical, 4)
 
                 MenuRow(
                     icon: "xmark.circle",
                     label: "Quit",
-                    isDestructive: true
+                    isDestructive: true,
+                    primaryTextColor: primaryTextColor
                 ) {
                     NSApplication.shared.terminate(nil)
                 }
@@ -118,11 +151,15 @@ struct NotchMenuView: View {
                 refreshStates()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            artworkAdaptiveBackgroundEnabled = AppSettings.artworkAdaptiveBackgroundEnabled
+        }
     }
 
     private func refreshStates() {
         hooksInstalled = HookInstaller.isInstalled()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        artworkAdaptiveBackgroundEnabled = AppSettings.artworkAdaptiveBackgroundEnabled
         screenSelector.refreshScreens()
     }
 }
@@ -370,6 +407,8 @@ struct UpdateRow: View {
 
 struct AccessibilityRow: View {
     let isEnabled: Bool
+    let primaryTextColor: Color
+    let secondaryTextColor: Color
 
     @State private var isHovered = false
     @State private var refreshTrigger = false
@@ -400,7 +439,7 @@ struct AccessibilityRow: View {
 
                 Text("On")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(secondaryTextColor)
             } else {
                 Button(action: openAccessibilitySettings) {
                     Text("Enable")
@@ -429,7 +468,7 @@ struct AccessibilityRow: View {
     }
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 
     private func openAccessibilitySettings() {
@@ -443,6 +482,7 @@ struct MenuRow: View {
     let icon: String
     let label: String
     var isDestructive: Bool = false
+    var primaryTextColor: Color = .white
     let action: () -> Void
 
     @State private var isHovered = false
@@ -477,7 +517,7 @@ struct MenuRow: View {
         if isDestructive {
             return Color(red: 1.0, green: 0.4, blue: 0.4)
         }
-        return .white.opacity(isHovered ? 1.0 : 0.7)
+        return primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 }
 
@@ -485,6 +525,8 @@ struct MenuToggleRow: View {
     let icon: String
     let label: String
     let isOn: Bool
+    var primaryTextColor: Color = .white
+    var secondaryTextColor: Color = .white.opacity(0.4)
     let action: () -> Void
 
     @State private var isHovered = false
@@ -509,7 +551,7 @@ struct MenuToggleRow: View {
 
                 Text(isOn ? "On" : "Off")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(secondaryTextColor)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -524,6 +566,6 @@ struct MenuToggleRow: View {
     }
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        primaryTextColor.opacity(isHovered ? 1.0 : 0.82)
     }
 }

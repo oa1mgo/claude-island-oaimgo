@@ -13,6 +13,7 @@ final class MusicManager: ObservableObject {
         NSColor.white.withAlphaComponent(0.75),
         NSColor.white.withAlphaComponent(0.55)
     ]
+    @Published private(set) var hasArtworkGradient = false
     @Published private(set) var sourceApp: SourceApp?
 
     private var cancellables = Set<AnyCancellable>()
@@ -51,7 +52,9 @@ final class MusicManager: ObservableObject {
                 self.playbackState = state
                 let image = state.artworkData.flatMap(NSImage.init(data:))
                 self.albumArt = image
-                self.artworkGradient = self.gradientColors(from: image)
+                let artworkGradientResult = self.gradientColors(from: image)
+                self.artworkGradient = artworkGradientResult.colors
+                self.hasArtworkGradient = artworkGradientResult.isExtractedFromArtwork
                 self.sourceApp = self.resolveSourceApp(bundleIdentifier: state.bundleIdentifier)
             }
             .store(in: &cancellables)
@@ -172,18 +175,18 @@ final class MusicManager: ObservableObject {
         return displayName.isEmpty ? nil : displayName
     }
 
-    private func gradientColors(from image: NSImage?) -> [NSColor] {
+    private func gradientColors(from image: NSImage?) -> (colors: [NSColor], isExtractedFromArtwork: Bool) {
         guard
             let image,
             let tiffData = image.tiffRepresentation,
             let ciImage = CIImage(data: tiffData)
         else {
-            return Self.defaultArtworkGradient
+            return (Self.defaultArtworkGradient, false)
         }
 
         let extent = ciImage.extent
         guard !extent.isEmpty else {
-            return Self.defaultArtworkGradient
+            return (Self.defaultArtworkGradient, false)
         }
 
         let regions = [
@@ -194,19 +197,19 @@ final class MusicManager: ObservableObject {
 
         let extracted = regions.compactMap { averageColor(in: ciImage, region: $0) }.map(normalizedGradientColor(_:))
         if extracted.count >= 3 {
-            return extracted
+            return (extracted, true)
         }
 
         if let single = averageColor(in: ciImage, region: extent) {
             let base = normalizedGradientColor(single)
-            return [
+            return ([
                 adjustedColor(base, saturation: 1.15, brightness: 1.18, alpha: 0.95),
                 adjustedColor(base, saturation: 1.0, brightness: 1.0, alpha: 0.8),
                 adjustedColor(base, saturation: 0.9, brightness: 0.78, alpha: 0.65)
-            ]
+            ], true)
         }
 
-        return Self.defaultArtworkGradient
+        return (Self.defaultArtworkGradient, false)
     }
 
     private func averageColor(in image: CIImage, region: CGRect) -> NSColor? {
