@@ -293,7 +293,25 @@ struct InstanceRow: View {
         case .claude:
             return claudeOrange
         case .codex:
-            return Color(red: 0.47, green: 0.76, blue: 0.95)
+            return Color(red: 0.39, green: 0.66, blue: 0.85)
+        }
+    }
+
+    private var providerLabelForeground: Color {
+        switch session.provider {
+        case .claude:
+            return Color(red: 0.74, green: 0.36, blue: 0.23)
+        case .codex:
+            return Color(red: 0.24, green: 0.50, blue: 0.68)
+        }
+    }
+
+    private var providerLabelBackground: Color {
+        switch session.provider {
+        case .claude:
+            return Color(red: 0.66, green: 0.49, blue: 0.39)
+        case .codex:
+            return Color(red: 0.50, green: 0.60, blue: 0.66)
         }
     }
 
@@ -342,10 +360,10 @@ struct InstanceRow: View {
 
                     Text(session.provider.displayName)
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(providerTint)
+                        .foregroundColor(providerLabelForeground)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(providerTint.opacity(0.14))
+                        .background(providerLabelBackground)
                         .clipShape(Capsule())
 
                     // Token usage indicator
